@@ -1,0 +1,43 @@
+networks:
+  lega-net:
+    driver: bridge
+    name: lega_net
+  bvi-net:
+    external: true
+    name: bvi_bvi-net
+
+services:
+  lega-backend:
+    build: ./backend
+    restart: always
+    ports:
+      - "8003:8000"
+    environment:
+      DATABASE_URL: postgresql://bvi_user:BviSecure2026!@bvi-db-1:5432/bvi_db
+      BVI_API_URL: http://bvi-api-1:8000
+    volumes:
+      - ./frontend/public/uploads:/app/uploads
+    networks:
+      - lega-net
+      - bvi-net
+
+  lega-frontend:
+    image: node:20-alpine
+    restart: always
+    ports:
+      - "3002:3000"
+    working_dir: /app
+    command: sh -c "npm install -g pnpm && pnpm install && pnpm run dev"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NEXT_PUBLIC_SITE_API_URL: http://76.13.141.221:8003/api/site
+      NEXT_PUBLIC_BVI_WS_URL: ws://76.13.141.221:8002/ws/stream
+      SITE_API_URL: http://lega-backend:8000
+      NODE_ENV: development
+    networks:
+      - lega-net
+    depends_on:
+      - lega-backend

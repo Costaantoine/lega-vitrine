@@ -1,0 +1,310 @@
+import asyncpg
+import asyncio
+import json
+import logging
+import os
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+import aiofiles
+import httpx
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+UPLOAD_DIR = Path("/app/uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+DB_URL = os.getenv("DATABASE_URL", "postgresql://bvi_user:BviSecure2026!@bvi-db:5432/bvi_db")
+BVI_API_URL = os.getenv("BVI_API_URL", "http://bvi-api-1:8000")
+
+app = FastAPI(title="LEGA Site API", version="1.0.0")
+app.mount("/uploads", StaticFiles(directory="/app/uploads"), name="uploads")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+async def db_connect():
+    return await asyncpg.connect(DB_URL)
+
+
+# ── Pydantic ──────────────────────────────────────────────────────────────────
+
+class ProductCreate(BaseModel):
+    title: str
+    category: str = "machines_tp"
+    brand: str = None
+    model: str = None
+    year: int = None
+    hours: int = None
+    price: float = None
+    currency: str = "EUR"
+    location: str = None
+    description: str = None
+    specs: dict = {}
+    images: list = []
+    status: str = "available"
+    source_url: str = None
+
+class ConfigUpdate(BaseModel):
+    value: str
+    updated_by: str = "manual"
+
+class TranslationUpdate(BaseModel):
+    lang: str
+    key: str
+    value: str
+
+class SectionUpdate(BaseModel):
+    enabled: bool = None
+    position: int = None
+    config: dict = None
+
+
+# ── Health ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/site/health")
+async def health():
+    return {"status": "ok", "service": "lega-site-api", "version": "1.0.0"}
+
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/site/config")
+async def get_config():
+    conn = await db_connect()
+    try:
+        rows = await conn.fetch("SELECT key, value, value_json, updated_at, updated_by FROM site_config ORDER BY key")
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+@app.get("/api/site/config/{key}")
+async def get_config_key(key: str):
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow("SELECT key, value, value_json FROM site_config WHERE key=$1", key)
+        if not row:
+            raise HTTPException(status_code=404, detail="Clé introuvable")
+        return dict(row)
+    finally:
+        await conn.close()
+
+@app.put("/api/site/config/{key}")
+async def update_config(key: str, body: ConfigUpdate):
+    conn = await db_connect()
+    try:
+        await conn.execute(
+            "INSERT INTO site_config (key, value, updated_by) VALUES ($1, $2, $3) "
+            "ON CONFLICT (key) DO UPDATE SET value=$2, updated_by=$3, updated_at=NOW()",
+            key, body.value, body.updated_by
+        )
+        await conn.execute(
+            "INSERT INTO site_audit_log (action, field, new_value, done_by) VALUES ($1,$2,$3,$4)",
+            "config_update", key, body.value, body.updated_by
+        )
+        return {"ok": True, "key": key, "value": body.value}
+    finally:
+        await conn.close()
+
+
+# ── Sections ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/site/sections")
+async def get_sections():
+    conn = await db_connect()
+    try:
+        rows = await conn.fetch("SELECT * FROM site_sections ORDER BY position")
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+@app.patch("/api/site/sections/{name}")
+async def update_section(name: str, body: SectionUpdate):
+    conn = await db_connect()
+    try:
+        updates = []
+        vals = []
+        i = 1
+        if body.enabled is not None:
+            updates.append(f"enabled=${i}"); vals.append(body.enabled); i += 1
+        if body.position is not None:
+            updates.append(f"position=${i}"); vals.append(body.position); i += 1
+        if body.config is not None:
+            updates.append(f"config=${i}"); vals.append(json.dumps(body.config)); i += 1
+        if not updates:
+            raise HTTPException(status_code=400, detail="Rien à modifier")
+        vals.append(name)
+        await conn.execute(
+            f"UPDATE site_sections SET {', '.join(updates)} WHERE name=${i}", *vals
+        )
+        return {"ok": True}
+    finally:
+        await conn.close()
+
+
+# ── Translations ──────────────────────────────────────────────────────────────
+
+@app.get("/api/site/translations/{lang}")
+async def get_translations(lang: str):
+    conn = await db_connect()
+    try:
+        rows = await conn.fetch("SELECT key, value FROM site_translations WHERE lang=$1", lang)
+        return {r["key"]: r["value"] for r in rows}
+    finally:
+        await conn.close()
+
+@app.put("/api/site/translations")
+async def upsert_translation(body: TranslationUpdate):
+    conn = await db_connect()
+    try:
+        await conn.execute(
+            "INSERT INTO site_translations (lang, key, value) VALUES ($1,$2,$3) "
+            "ON CONFLICT (lang, key) DO UPDATE SET value=$3, updated_at=NOW()",
+            body.lang, body.key, body.value
+        )
+        return {"ok": True}
+    finally:
+        await conn.close()
+
+
+# ── Produits ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/site/products")
+async def get_products(category: str = None, status: str = None, limit: int = 50, offset: int = 0):
+    conn = await db_connect()
+    try:
+        where = []
+        vals = []
+        i = 1
+        if category:
+            where.append(f"category=${i}"); vals.append(category); i += 1
+        if status:
+            where.append(f"status=${i}"); vals.append(status); i += 1
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        vals += [limit, offset]
+        rows = await conn.fetch(
+            f"SELECT * FROM site_products {clause} ORDER BY created_at DESC LIMIT ${i} OFFSET ${i+1}",
+            *vals
+        )
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM site_products {clause}", *vals[:-2])
+        return {"total": total, "items": [dict(r) for r in rows]}
+    finally:
+        await conn.close()
+
+@app.get("/api/site/products/{product_id}")
+async def get_product(product_id: str):
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow("SELECT * FROM site_products WHERE id=$1", uuid.UUID(product_id))
+        if not row:
+            raise HTTPException(status_code=404, detail="Produit introuvable")
+        return dict(row)
+    finally:
+        await conn.close()
+
+@app.post("/api/site/products")
+async def create_product(p: ProductCreate):
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow(
+            """INSERT INTO site_products
+               (title, category, brand, model, year, hours, price, currency,
+                location, description, specs, images, status, source_url)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+               RETURNING id""",
+            p.title, p.category, p.brand, p.model, p.year, p.hours, p.price,
+            p.currency, p.location, p.description,
+            json.dumps(p.specs), json.dumps(p.images), p.status, p.source_url
+        )
+        return {"id": str(row["id"])}
+    finally:
+        await conn.close()
+
+@app.post("/api/site/products/{product_id}/upload")
+async def upload_product_image(product_id: str, file: UploadFile = File(...)):
+    ext = Path(file.filename).suffix.lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(status_code=400, detail="Format non supporté")
+    fname = f"{uuid.uuid4()}{ext}"
+    fpath = UPLOAD_DIR / fname
+    async with aiofiles.open(fpath, "wb") as f:
+        await f.write(await file.read())
+    url = f"/uploads/{fname}"
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow("SELECT images FROM site_products WHERE id=$1", uuid.UUID(product_id))
+        if not row:
+            raise HTTPException(status_code=404, detail="Produit introuvable")
+        imgs = json.loads(row["images"] or "[]")
+        imgs.append(url)
+        await conn.execute("UPDATE site_products SET images=$1, updated_at=NOW() WHERE id=$2",
+                           json.dumps(imgs), uuid.UUID(product_id))
+    finally:
+        await conn.close()
+    return {"url": url}
+
+@app.patch("/api/site/products/{product_id}/status")
+async def patch_product_status(product_id: str, body: dict):
+    valid = {"available", "sold", "reserved", "new", "archived"}
+    status = body.get("status")
+    if status not in valid:
+        raise HTTPException(status_code=400, detail=f"Status invalide. Valeurs: {valid}")
+    conn = await db_connect()
+    try:
+        await conn.execute(
+            "UPDATE site_products SET status=$1, updated_at=NOW() WHERE id=$2",
+            status, uuid.UUID(product_id)
+        )
+        return {"ok": True, "status": status}
+    finally:
+        await conn.close()
+
+
+# ── Audit log ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/site/audit")
+async def get_audit(limit: int = 50):
+    conn = await db_connect()
+    try:
+        rows = await conn.fetch(
+            "SELECT * FROM site_audit_log ORDER BY created_at DESC LIMIT $1", limit
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+# ── Contact / devis ───────────────────────────────────────────────────────────
+
+class ContactRequest(BaseModel):
+    name: str
+    email: str
+    phone: str = None
+    lang: str = "fr"
+    product_id: str = None
+    message: str = ""
+
+@app.post("/api/site/contact")
+async def submit_contact(req: ContactRequest):
+    conn = await db_connect()
+    try:
+        await conn.execute(
+            "INSERT INTO site_audit_log (action, field, new_value, done_by) VALUES ($1,$2,$3,$4)",
+            "contact_form", req.email,
+            f"name={req.name} | phone={req.phone} | product={req.product_id} | msg={req.message[:200]}",
+            "visitor"
+        )
+    finally:
+        await conn.close()
+    return {"ok": True, "message": "Demande enregistrée"}
