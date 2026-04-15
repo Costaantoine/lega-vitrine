@@ -65,6 +65,8 @@ export default function LegaSite() {
   const [contactForm, setContactForm] = useState({ name:"", email:"", phone:"", message:"" });
   const [contactSent, setContactSent] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product|null>(null);
+  const [quoteProductId, setQuoteProductId] = useState<string|null>(null);
+  const [quoteProductTitle, setQuoteProductTitle] = useState<string|null>(null);
 
   // Charger langue
   useEffect(() => {
@@ -127,7 +129,7 @@ export default function LegaSite() {
       await fetch(`${SITE_API}/contact`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...contactForm, lang }),
+        body: JSON.stringify({ ...contactForm, lang, product_id: quoteProductId }),
       });
       setContactSent(true);
     } catch {}
@@ -289,6 +291,13 @@ export default function LegaSite() {
           </div>
         ) : (
           <div style={s({ display: "flex", flexDirection: "column", gap: 16 })}>
+            {quoteProductTitle && (
+              <div style={s({ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "10px 14px", fontSize: 14, color: "#1e40af", display: "flex", justifyContent: "space-between", alignItems: "center" })}>
+                <span>📋 <strong>{T("quote_for")} :</strong> {quoteProductTitle}</span>
+                <button onClick={() => { setQuoteProductId(null); setQuoteProductTitle(null); setContactForm(prev => ({ ...prev, message: "" })); }}
+                  style={s({ background: "none", border: "none", cursor: "pointer", color: "#64748b", fontSize: 16 })}>✕</button>
+              </div>
+            )}
             {(["contact_name","contact_email","contact_phone"] as const).map(k => (
               <input key={k}
                 placeholder={T(k)}
@@ -383,7 +392,13 @@ export default function LegaSite() {
       {selectedProduct && (
         <ProductModal product={selectedProduct} t={T} c1={C1} c2={C2}
           onClose={() => setSelectedProduct(null)}
-          onQuote={() => { setSelectedProduct(null); document.getElementById("contact")?.scrollIntoView({ behavior: "smooth" }); }} />
+          onQuote={() => {
+            setQuoteProductId(selectedProduct.id);
+            setQuoteProductTitle(selectedProduct.title);
+            setContactForm(prev => ({ ...prev, message: `${T("quote_ref_prefix")} ${selectedProduct.title} (${selectedProduct.year || ""}${selectedProduct.hours ? ` — ${selectedProduct.hours.toLocaleString()}h` : ""})` }));
+            setSelectedProduct(null);
+            setTimeout(() => document.getElementById("contact")?.scrollIntoView({ behavior: "smooth" }), 100);
+          }} />
       )}
     </div>
   );
