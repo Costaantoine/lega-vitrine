@@ -254,6 +254,36 @@ async def upload_product_image(product_id: str, file: UploadFile = File(...)):
         await conn.close()
     return {"url": url}
 
+@app.put("/api/site/products/{product_id}")
+async def update_product(product_id: str, p: ProductCreate):
+    conn = await db_connect()
+    try:
+        await conn.execute(
+            """UPDATE site_products SET title=$1, category=$2, brand=$3, model=$4,
+               year=$5, hours=$6, price=$7, currency=$8, location=$9, description=$10,
+               specs=$11, images=$12, status=$13, source_url=$14, updated_at=NOW()
+               WHERE id=$15""",
+            p.title, p.category, p.brand, p.model, p.year, p.hours, p.price,
+            p.currency, p.location, p.description,
+            json.dumps(p.specs), json.dumps(p.images), p.status, p.source_url,
+            uuid.UUID(product_id)
+        )
+        return {"ok": True, "id": product_id}
+    finally:
+        await conn.close()
+
+@app.delete("/api/site/products/{product_id}")
+async def delete_product(product_id: str):
+    conn = await db_connect()
+    try:
+        await conn.execute(
+            "UPDATE site_products SET status='archived', updated_at=NOW() WHERE id=$1",
+            uuid.UUID(product_id)
+        )
+        return {"ok": True}
+    finally:
+        await conn.close()
+
 @app.patch("/api/site/products/{product_id}/status")
 async def patch_product_status(product_id: str, body: dict):
     valid = {"available", "sold", "reserved", "new", "archived"}
@@ -271,6 +301,45 @@ async def patch_product_status(product_id: str, body: dict):
         await conn.close()
 
 
+# ── Config bulk + upload ──────────────────────────────────────────────────────
+
+@app.post("/api/site/config/bulk")
+async def bulk_update_config(body: dict):
+    """body = {"key1": "val1", "key2": "val2", ...}"""
+    conn = await db_connect()
+    try:
+        for key, value in body.items():
+            await conn.execute(
+                "INSERT INTO site_config (key, value, updated_by) VALUES ($1,$2,'dashboard') "
+                "ON CONFLICT (key) DO UPDATE SET value=$2, updated_by='dashboard', updated_at=NOW()",
+                key, str(value)
+            )
+        return {"ok": True, "updated": len(body)}
+    finally:
+        await conn.close()
+
+@app.post("/api/site/upload")
+async def upload_site_asset(file: UploadFile = File(...), asset_type: str = "logo"):
+    """Upload logo or hero image — stores URL in site_config."""
+    ext = Path(file.filename).suffix.lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".svg"}:
+        raise HTTPException(400, "Format non supporté (jpg/png/webp/svg)")
+    fname = f"{asset_type}_{uuid.uuid4().hex[:8]}{ext}"
+    fpath = UPLOAD_DIR / fname
+    async with aiofiles.open(fpath, "wb") as f:
+        await f.write(await file.read())
+    url = f"/uploads/{fname}"
+    conn = await db_connect()
+    try:
+        await conn.execute(
+            "INSERT INTO site_config (key, value, updated_by) VALUES ($1,$2,'dashboard') "
+            "ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=NOW()",
+            asset_type, url
+        )
+    finally:
+        await conn.close()
+    return {"ok": True, "url": url, "asset_type": asset_type}
+
 # ── Audit log ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/site/audit")
@@ -284,6 +353,105 @@ async def get_audit(limit: int = 50):
     finally:
         await conn.close()
 
+
+# ── Import tob.pt ────────────────────────────────────────────────────────────
+
+@app.post("/api/site/import/tob")
+async def import_from_tob(body: dict = {}):
+    """
+    Scrape le catalogue machines de tob.pt (https://www.tob.pt/pt/machinery.aspx)
+    et insère les annonces dans site_products.
+
+    Structure réelle de tob.pt :
+      - URL catalogue : /pt/machinery.aspx (pas de search par keyword)
+      - Items : <div class="span3 portfolio-item logo coding">
+      - Marque : <h2 class="post-title">
+      - Détail : href="Detail.aspx?MaquinaID=NNN"
+      - Métadonnées dans post-meta : "Modelo: XXX / YYYY"
+      - Image : https://www.tob.pt/Handler.ashx?MaquinaID=NNN&Size=S
+      - Prix : "Contacte-nos" (non public)
+    """
+    import re
+
+    max_items = body.get("max_items", 20)
+    inserted = []
+    errors = []
+
+    listing_url = "https://www.tob.pt/pt/machinery.aspx"
+    base_url = "https://www.tob.pt"
+
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    ) as client:
+        try:
+            resp = await client.get(listing_url)
+            if resp.status_code != 200:
+                return {"ok": False, "inserted": 0, "items": [], "errors": [f"tob.pt HTTP {resp.status_code}"]}
+            html = resp.text
+        except Exception as e:
+            return {"ok": False, "inserted": 0, "items": [], "errors": [f"Connexion tob.pt: {str(e)[:100]}"]}
+
+        # Extraction directe par regex simples sur le HTML complet
+        # IDs dédupliqués dans l'ordre d'apparition
+        all_ids = re.findall(r'Detail\.aspx\?MaquinaID=(\d+)', html)
+        seen_ids: dict = {}
+        for mid in all_ids:
+            seen_ids.setdefault(mid, None)
+        maquina_ids = list(seen_ids.keys())
+
+        brands = re.findall(r'class="post-title">([^<]+)</h2>', html)
+        models = re.findall(r'class="post-meta">\s*Modelo:\s*([^<\n]+?)(?:\s*$|\s*<)', html, re.MULTILINE)
+        years_raw = re.findall(r'class="meta-spacer">/</span>\s*(\d{4})', html)
+
+        conn = await db_connect()
+        try:
+            seen = set()
+            for i, mid in enumerate(maquina_ids[:max_items]):
+                if mid in seen:
+                    continue
+                seen.add(mid)
+
+                brand = brands[i].strip() if i < len(brands) else ""
+                model = models[i].strip() if i < len(models) else ""
+                year = None
+                if i < len(years_raw):
+                    try:
+                        y = int(years_raw[i])
+                        if 1970 <= y <= 2030:
+                            year = y
+                    except ValueError:
+                        pass
+
+                title = f"{brand} {model}".strip() or f"Machine tob.pt #{mid}"
+                source_url = f"{base_url}/pt/Detail.aspx?MaquinaID={mid}"
+                image_url = f"{base_url}/Handler.ashx?MaquinaID={mid}&Size=S"
+
+                # Skip si déjà importé
+                existing = await conn.fetchval(
+                    "SELECT id FROM site_products WHERE source_url=$1", source_url
+                )
+                if existing:
+                    continue
+
+                pid = await conn.fetchval(
+                    """INSERT INTO site_products
+                       (title, category, brand, model, year, currency, status,
+                        source_url, images, description)
+                       VALUES ($1,'machines_tp',$2,$3,$4,'EUR','available',$5,$6,$7)
+                       RETURNING id""",
+                    title, brand or None, model or None, year,
+                    source_url,
+                    json.dumps([image_url]),
+                    f"Importé depuis tob.pt (MaquinaID={mid}). Prix sur demande."
+                )
+                inserted.append({"id": str(pid), "title": title, "year": year, "source_url": source_url})
+                logger.info(f"tob.pt import: {title} ({mid})")
+        finally:
+            await conn.close()
+
+    return {"ok": True, "inserted": len(inserted), "items": inserted, "errors": errors}
 
 # ── Contact / devis ───────────────────────────────────────────────────────────
 
