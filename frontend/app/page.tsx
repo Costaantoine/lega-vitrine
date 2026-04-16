@@ -28,6 +28,18 @@ const cache: Record<string, Dict> = {};
 
 async function loadLocale(lang: string): Promise<Dict> {
   if (cache[lang]) return cache[lang];
+  // 1. Essayer la DB (traductions éditables depuis le dashboard CMS)
+  try {
+    const r = await fetch(`${SITE_API}/translations/${lang}`);
+    if (r.ok) {
+      const d = await r.json();
+      if (Object.keys(d).length > 0) {
+        cache[lang] = d;
+        return d;
+      }
+    }
+  } catch { /* fallback fichier statique */ }
+  // 2. Fallback : fichier statique /locales/{lang}.json
   try {
     const r = await fetch(`/locales/${lang}.json`);
     const d = await r.json();
