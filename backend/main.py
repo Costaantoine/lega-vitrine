@@ -65,6 +65,10 @@ class TranslationUpdate(BaseModel):
     key: str
     value: str
 
+class TranslationsBulkUpdate(BaseModel):
+    lang: str
+    translations: dict  # {key: value}
+
 class SectionUpdate(BaseModel):
     enabled: bool = None
     position: int = None
@@ -174,6 +178,21 @@ async def upsert_translation(body: TranslationUpdate):
             body.lang, body.key, body.value
         )
         return {"ok": True}
+    finally:
+        await conn.close()
+
+@app.put("/api/site/translations/bulk")
+async def upsert_translations_bulk(body: TranslationsBulkUpdate):
+    conn = await db_connect()
+    try:
+        async with conn.transaction():
+            for key, value in body.translations.items():
+                await conn.execute(
+                    "INSERT INTO site_translations (lang, key, value) VALUES ($1,$2,$3) "
+                    "ON CONFLICT (lang, key) DO UPDATE SET value=$3, updated_at=NOW()",
+                    body.lang, key, str(value)
+                )
+        return {"ok": True, "updated": len(body.translations)}
     finally:
         await conn.close()
 
