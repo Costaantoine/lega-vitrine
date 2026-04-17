@@ -16,6 +16,8 @@ const LANGS = [
   { code: "es", label: "ES", dir: "ltr" },
   { code: "de", label: "DE", dir: "ltr" },
   { code: "it", label: "IT", dir: "ltr" },
+  { code: "nl", label: "NL", dir: "ltr" },
+  { code: "zh", label: "ZH", dir: "ltr" },
   { code: "ru", label: "RU", dir: "ltr" },
   { code: "ar", label: "AR", dir: "rtl" },
 ];
