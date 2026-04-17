@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const stripEmoji = (s: string) =>
   s.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E0}-\u{1F1FF}]/gu, "")
@@ -75,14 +75,22 @@ export default function LegaSite() {
   const [catFilter, setCatFilter] = useState("");
   const [searchQ, setSearchQ]     = useState("");
   const [chatOpen, setChatOpen]   = useState(false);
-  const [chatMsgs, setChatMsgs]   = useState<{role:string; text:string}[]>([]);
+  const [chatMsgs, setChatMsgs]   = useState<{role:string; text:string; streaming?:boolean}[]>([]);
   const [chatInput, setChatInput] = useState("");
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const ttsEnabledRef = useRef(false);
+  const audioCtxRef  = useRef<AudioContext|null>(null);
+  const audioQueueRef = useRef<AudioBuffer[]>([]);
+  const audioPlayingRef = useRef(false);
   const [ws, setWs]               = useState<WebSocket|null>(null);
   const [contactForm, setContactForm] = useState({ name:"", email:"", phone:"", message:"" });
   const [contactSent, setContactSent] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product|null>(null);
   const [quoteProductId, setQuoteProductId] = useState<string|null>(null);
   const [quoteProductTitle, setQuoteProductTitle] = useState<string|null>(null);
+
+  // Sync TTS ref
+  useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
 
   // Charger langue
   useEffect(() => {
@@ -137,12 +145,54 @@ export default function LegaSite() {
     if (ws) return;
     const sid = `lega-vitrine-${Date.now()}`;
     const socket = new WebSocket(`${BVI_WS}?session_id=${sid}&preferred_agent=standardiste`);
+    const playNext = (ctx: AudioContext) => {
+      if (audioPlayingRef.current || audioQueueRef.current.length === 0) return;
+      audioPlayingRef.current = true;
+      const buf = audioQueueRef.current.shift()!;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.onended = () => { audioPlayingRef.current = false; playNext(ctx); };
+      src.start(0);
+    };
+
     socket.onmessage = (e) => {
       try {
         const d = JSON.parse(e.data);
-        const raw = d.message || d.direct_response || d.result || JSON.stringify(d);
-        const text = stripEmoji(raw);
-        setChatMsgs(prev => [...prev, { role: "assistant", text }]);
+
+        if (d.type === "text_chunk") {
+          const chunk = stripEmoji(d.payload || "");
+          if (!chunk) return;
+          setChatMsgs(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.streaming) return [...prev.slice(0,-1), { ...last, text: last.text + chunk }];
+            return [...prev, { role: "assistant", text: chunk, streaming: true }];
+          });
+          return;
+        }
+
+        if (d.type === "audio_chunk") {
+          if (!ttsEnabledRef.current) return;
+          try {
+            if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+            const ctx = audioCtxRef.current;
+            const bytes = Uint8Array.from(atob(d.payload), c => c.charCodeAt(0));
+            ctx.decodeAudioData(bytes.buffer.slice(0), buf => {
+              audioQueueRef.current.push(buf);
+              playNext(ctx);
+            });
+          } catch {}
+          return;
+        }
+
+        if (d.type !== "agent_response") return;
+        const raw = d.payload || d.message || d.direct_response || "";
+        setChatMsgs(prev => {
+          const last = prev[prev.length - 1];
+          if (last?.streaming) return [...prev.slice(0,-1), { ...last, streaming: false }];
+          if (!raw) return prev;
+          return [...prev, { role: "assistant", text: stripEmoji(raw) }];
+        });
       } catch {}
     };
     setWs(socket);
@@ -151,7 +201,7 @@ export default function LegaSite() {
   const sendChat = () => {
     if (!chatInput.trim() || !ws) return;
     setChatMsgs(prev => [...prev, { role: "user", text: chatInput }]);
-    ws.send(JSON.stringify({ message: chatInput, lang }));
+    ws.send(JSON.stringify({ payload: chatInput, lang, preferred_agent: "vitrine_bot" }));
     setChatInput("");
   };
 
@@ -214,7 +264,7 @@ export default function LegaSite() {
 
       {/* ── HERO ────────────────────────────────────────────────────────── */}
       <section id="home" style={s({
-        background: `linear-gradient(rgba(27,63,110,0.72) 0%, rgba(27,63,110,0.5) 100%), url('https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=1600&q=80') center/cover no-repeat`,
+        background: `linear-gradient(rgba(27,63,110,0.72) 0%, rgba(27,63,110,0.5) 100%), url('https://images.unsplash.com/photo-1558618047-3c8c76ca7d13?w=1600&q=80') center/cover no-repeat`,
         color: "#fff", padding: "100px 24px 80px", textAlign: "center",
         minHeight: 480, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       })}>
@@ -388,9 +438,19 @@ export default function LegaSite() {
           border: `2px solid ${C2}`,
         })}>
           <div style={s({ background: C1, color: "#fff", padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" })}>
-            <span style={s({ fontWeight: 700 })}>🤖 LEGA IA</span>
-            <button onClick={() => setChatOpen(false)}
-              style={s({ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 18 })}>✕</button>
+            <span style={s({ fontWeight: 700, fontSize: 14 })}>Léa — LEGA.PT</span>
+            <div style={s({ display: "flex", gap: 8, alignItems: "center" })}>
+              <button onClick={() => {
+                if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+                setTtsEnabled(v => !v);
+              }}
+                title={ttsEnabled ? "Couper le son" : "Activer le son"}
+                style={s({ background: ttsEnabled ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)", border: "none", color: "#fff", cursor: "pointer", fontSize: 15, borderRadius: 6, padding: "3px 7px" })}>
+                {ttsEnabled ? "🔊" : "🔇"}
+              </button>
+              <button onClick={() => setChatOpen(false)}
+                style={s({ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 18 })}>✕</button>
+            </div>
           </div>
           <div style={s({ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8 })}>
             {chatMsgs.length === 0 && (
