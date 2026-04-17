@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'LEGA Trading — Machines TP & Véhicules',
-  description: 'LEGA Trading — Achat, vente de machines de travaux publics, camions et semi-remorques au Portugal et en Europe.',
+  title: 'LEGA.PT — Machines TP & Véhicules',
+  description: 'LEGA.PT — Achat, vente de machines de travaux publics, camions et semi-remorques au Portugal et en Europe.',
   keywords: 'excavatrice, pelleteuse, camion, semi-remorque, machines TP, Portugal',
 };
 

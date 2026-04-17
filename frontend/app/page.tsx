@@ -1,6 +1,10 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 
+const stripEmoji = (s: string) =>
+  s.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E0}-\u{1F1FF}]/gu, "")
+   .replace(/\s{2,}/g, " ").trim();
+
 // ── Config ─────────────────────────────────────────────────────────────────
 const SITE_API = process.env.NEXT_PUBLIC_SITE_API_URL || "http://76.13.141.221:8003/api/site";
 const BVI_WS   = process.env.NEXT_PUBLIC_BVI_WS_URL   || "ws://76.13.141.221:8002/ws/stream";
@@ -113,16 +117,31 @@ export default function LegaSite() {
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
+  const WELCOME: Record<string, string> = {
+    fr: "Bonjour et bienvenue sur notre vitrine.\nJe m'appelle Léa, je suis à votre disposition pour répondre à vos questions.",
+    pt: "Bom dia e bem-vindo à nossa vitrine.\nChamo-me Léa e estou à sua disposição para responder às suas questões.",
+    en: "Good day and welcome to our showroom.\nMy name is Lea, I am at your disposal to answer your questions.",
+    es: "Buenos días y bienvenido a nuestra tienda.\nMe llamo Léa y estoy a su disposición para responder a sus preguntas.",
+    de: "Guten Tag und herzlich willkommen in unserem Showroom.\nMein Name ist Léa, ich stehe Ihnen gerne zur Verfügung.",
+    it: "Buongiorno e benvenuto nel nostro showroom.\nMi chiamo Léa, sono a vostra disposizione per rispondere alle vostre domande.",
+    ru: "Добрый день и добро пожаловать в наш шоу-рум.\nМеня зовут Лея, я в вашем распоряжении для ответов на ваши вопросы.",
+    ar: "مرحباً بكم في معرضنا.\nاسمي ليا، وأنا في خدمتكم للإجابة على تساؤلاتكم.",
+  };
+
   // WS chat
   const openChat = () => {
-    setChatOpen(true);
+    if (!chatOpen) {
+      setChatOpen(true);
+      setChatMsgs([{ role: "assistant", text: WELCOME[lang] || WELCOME["fr"] }]);
+    }
     if (ws) return;
     const sid = `lega-vitrine-${Date.now()}`;
     const socket = new WebSocket(`${BVI_WS}?session_id=${sid}&preferred_agent=standardiste`);
     socket.onmessage = (e) => {
       try {
         const d = JSON.parse(e.data);
-        const text = d.message || d.direct_response || d.result || JSON.stringify(d);
+        const raw = d.message || d.direct_response || d.result || JSON.stringify(d);
+        const text = stripEmoji(raw);
         setChatMsgs(prev => [...prev, { role: "assistant", text }]);
       } catch {}
     };
@@ -162,9 +181,14 @@ export default function LegaSite() {
         boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
       })}>
         <div style={s({ display: "flex", alignItems: "center", gap: 16 })}>
-          <span style={s({ fontWeight: 800, fontSize: 22, letterSpacing: "-0.5px" })}>
-            <span style={s({ color: C2 })}>LEGA</span> Trading
-          </span>
+          {cfg["logo_url"] ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={cfg["logo_url"]} alt="LEGA.PT" style={s({ height: 36, objectFit: "contain" })} />
+          ) : (
+            <span style={s({ fontWeight: 800, fontSize: 22, letterSpacing: "-0.5px" })}>
+              <span style={s({ color: C2 })}>LEGA</span>.PT
+            </span>
+          )}
           <div style={s({ display: "flex", gap: 8, marginInlineStart: 24 })}>
             {["nav_home","nav_catalogue","nav_contact"].map(k => (
               <a key={k} href={`#${k.split("_")[1]}`}
@@ -195,7 +219,7 @@ export default function LegaSite() {
         minHeight: 480, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       })}>
         <h1 style={s({ fontSize: "clamp(28px, 5vw, 52px)", fontWeight: 800, margin: "0 0 16px", lineHeight: 1.15, maxWidth: 700 })}>
-          {cfg["site_name"] || "LEGA Trading"}
+          {cfg["site_name"] || "LEGA.PT"}
         </h1>
         <p style={s({ fontSize: "clamp(16px, 2.5vw, 22px)", margin: "0 0 36px", opacity: 0.92, maxWidth: 600 })}>
           {slogan}
@@ -342,7 +366,7 @@ export default function LegaSite() {
 
       {/* ── FOOTER ──────────────────────────────────────────────────────── */}
       <footer style={s({ background: C1, color: "rgba(255,255,255,0.7)", padding: "24px", textAlign: "center", fontSize: 13 })}>
-        <strong style={s({ color: "#fff" })}>LEGA Trading</strong> © {new Date().getFullYear()} — {T("footer_rights")}
+        <strong style={s({ color: "#fff" })}>LEGA.PT</strong> © {new Date().getFullYear()} — {T("footer_rights")}
       </footer>
 
       {/* ── CHAT WIDGET ─────────────────────────────────────────────────── */}
