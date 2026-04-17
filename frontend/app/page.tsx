@@ -15,16 +15,16 @@ const assetUrl = (v: string | undefined) =>
   v ? (v.startsWith("http") ? v : `${SITE_BASE}${v}`) : undefined;
 
 const LANGS = [
-  { code: "pt", label: "PT", dir: "ltr" },
-  { code: "fr", label: "FR", dir: "ltr" },
-  { code: "en", label: "EN", dir: "ltr" },
-  { code: "es", label: "ES", dir: "ltr" },
-  { code: "de", label: "DE", dir: "ltr" },
-  { code: "it", label: "IT", dir: "ltr" },
-  { code: "nl", label: "NL", dir: "ltr" },
-  { code: "zh", label: "ZH", dir: "ltr" },
-  { code: "ru", label: "RU", dir: "ltr" },
-  { code: "ar", label: "AR", dir: "rtl" },
+  { code: "pt", label: "🇵🇹 PT", dir: "ltr" },
+  { code: "fr", label: "🇫🇷 FR", dir: "ltr" },
+  { code: "en", label: "🇬🇧 EN", dir: "ltr" },
+  { code: "es", label: "🇪🇸 ES", dir: "ltr" },
+  { code: "de", label: "🇩🇪 DE", dir: "ltr" },
+  { code: "it", label: "🇮🇹 IT", dir: "ltr" },
+  { code: "nl", label: "🇳🇱 NL", dir: "ltr" },
+  { code: "zh", label: "🇨🇳 ZH", dir: "ltr" },
+  { code: "ru", label: "🇷🇺 RU", dir: "ltr" },
+  { code: "ar", label: "🇸🇦 AR", dir: "rtl" },
 ];
 
 const CATEGORIES = ["machines_tp", "trucks", "trailers", "vans"];
@@ -63,7 +63,7 @@ interface SiteConfig { [key: string]: string }
 interface Product {
   id: string; title: string; category: string; brand: string; model: string;
   year: number; hours: number; price: number; currency: string;
-  location: string; description: string; images: string[]; status: string;
+  location: string; description: string; images: string[]; status: string; reference: string;
 }
 
 // ── Styles helper ──────────────────────────────────────────────────────────
@@ -130,14 +130,16 @@ export default function LegaSite() {
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
   const WELCOME: Record<string, string> = {
-    fr: "Bonjour et bienvenue sur notre vitrine.\nJe m'appelle Léa, je suis à votre disposition pour répondre à vos questions.",
-    pt: "Bom dia e bem-vindo à nossa vitrine.\nChamo-me Léa e estou à sua disposição para responder às suas questões.",
-    en: "Good day and welcome to our showroom.\nMy name is Lea, I am at your disposal to answer your questions.",
-    es: "Buenos días y bienvenido a nuestra tienda.\nMe llamo Léa y estoy a su disposición para responder a sus preguntas.",
-    de: "Guten Tag und herzlich willkommen in unserem Showroom.\nMein Name ist Léa, ich stehe Ihnen gerne zur Verfügung.",
-    it: "Buongiorno e benvenuto nel nostro showroom.\nMi chiamo Léa, sono a vostra disposizione per rispondere alle vostre domande.",
-    ru: "Добрый день и добро пожаловать в наш шоу-рум.\nМеня зовут Лея, я в вашем распоряжении для ответов на ваши вопросы.",
-    ar: "مرحباً بكم في معرضنا.\nاسمي ليا، وأنا في خدمتكم للإجابة على تساؤلاتكم.",
+    fr: "Bonjour, je suis Léa. Comment puis-je vous aider ?",
+    pt: "Olá, sou a Léa. Como posso ajudá-lo?",
+    en: "Hello, I am Léa. How can I help you?",
+    es: "Hola, soy Léa. ¿En qué puedo ayudarle?",
+    de: "Hallo, ich bin Léa. Wie kann ich Ihnen helfen?",
+    it: "Buongiorno, sono Léa. Come posso aiutarla?",
+    nl: "Hallo, ik ben Léa. Hoe kan ik u helpen?",
+    zh: "您好，我是Léa。请问有什么可以帮您？",
+    ru: "Здравствуйте, я Лея. Чем могу помочь?",
+    ar: "مرحباً، أنا ليا. كيف يمكنني مساعدتك؟",
   };
 
   // WS chat
@@ -190,6 +192,8 @@ export default function LegaSite() {
         }
 
         if (d.type !== "agent_response") return;
+        // Ignorer le greeting Tony — ce chat affiche uniquement Léa
+        if (d.metadata?.agent === "tony") return;
         const raw = d.payload || d.message || d.direct_response || "";
         setChatMsgs(prev => {
           const last = prev[prev.length - 1];
@@ -526,8 +530,11 @@ function ProductCard({ product: p, t, c1, c2, onClick }:
         <img src={thumb} alt={p.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </div>
       <div style={{ padding: "14px 16px" }}>
-        <div style={{ fontSize: 11, color: c2, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
-          {t(`cat_${p.category}`) || p.category}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div style={{ fontSize: 11, color: c2, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {t(`cat_${p.category}`) || p.category}
+          </div>
+          {p.reference && <span style={{ fontSize: 10, fontFamily: "monospace", color: "#94a3b8", background: "#f1f5f9", padding: "2px 6px", borderRadius: 4 }}>{p.reference}</span>}
         </div>
         <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700, color: "#1e293b", lineClamp: 2 }}>{p.title}</h3>
         <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#64748b", marginBottom: 12 }}>

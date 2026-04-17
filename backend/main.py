@@ -470,18 +470,27 @@ async def _scrape_tob_once(max_items: int = 200) -> dict:
                 if existing:
                     continue
 
+                # Générer référence unique : prefix 3 lettres + numéro séquentiel
+                prefix = (brand[:3].upper() if brand else "MAC")
+                total_count = await conn.fetchval("SELECT COUNT(*) FROM site_products") or 0
+                ref_candidate = f"{prefix}-{str(total_count + 1).zfill(3)}"
+                while await conn.fetchval("SELECT 1 FROM site_products WHERE reference=$1", ref_candidate):
+                    total_count += 1
+                    ref_candidate = f"{prefix}-{str(total_count + 1).zfill(3)}"
+
                 pid = await conn.fetchval(
                     """INSERT INTO site_products
                        (title, category, brand, model, year, currency, status,
-                        source_url, images, description)
-                       VALUES ($1,'machines_tp',$2,$3,$4,'EUR','available',$5,$6,$7)
+                        source_url, images, description, reference)
+                       VALUES ($1,'machines_tp',$2,$3,$4,'EUR','available',$5,$6,$7,$8)
                        RETURNING id""",
                     title, brand or None, model or None, year,
                     source_url,
                     json.dumps([image_url]),
-                    f"Importé depuis tob.pt (MaquinaID={mid}). Prix sur demande."
+                    f"Importé depuis tob.pt (MaquinaID={mid}). Prix sur demande.",
+                    ref_candidate,
                 )
-                inserted.append({"id": str(pid), "title": title})
+                inserted.append({"id": str(pid), "title": title, "reference": ref_candidate})
                 logger.info(f"[tob-cron] nouveau: {title} ({mid})")
         finally:
             await conn.close()
