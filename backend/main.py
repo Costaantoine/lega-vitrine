@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -373,31 +374,49 @@ async def get_audit(limit: int = 50):
         await conn.close()
 
 
-# ── Import tob.pt ────────────────────────────────────────────────────────────
+# ── Import tob.pt (manuel) ────────────────────────────────────────────────────
 
 @app.post("/api/site/import/tob")
 async def import_from_tob(body: dict = {}):
-    """
-    Scrape le catalogue machines de tob.pt (https://www.tob.pt/pt/machinery.aspx)
-    et insère les annonces dans site_products.
+    """Import manuel tob.pt — délègue à _scrape_tob_once."""
+    max_items = body.get("max_items", 200)
+    return await _scrape_tob_once(max_items=max_items)
 
-    Structure réelle de tob.pt :
-      - URL catalogue : /pt/machinery.aspx (pas de search par keyword)
-      - Items : <div class="span3 portfolio-item logo coding">
-      - Marque : <h2 class="post-title">
-      - Détail : href="Detail.aspx?MaquinaID=NNN"
-      - Métadonnées dans post-meta : "Modelo: XXX / YYYY"
-      - Image : https://www.tob.pt/Handler.ashx?MaquinaID=NNN&Size=S
-      - Prix : "Contacte-nos" (non public)
-    """
-    import re
+# ── Contact / devis ───────────────────────────────────────────────────────────
 
-    max_items = body.get("max_items", 20)
-    inserted = []
-    errors = []
+class ContactRequest(BaseModel):
+    name: str
+    email: str
+    phone: str = None
+    lang: str = "fr"
+    product_id: str = None
+    message: str = ""
 
+@app.post("/api/site/contact")
+async def submit_contact(req: ContactRequest):
+    conn = await db_connect()
+    try:
+        await conn.execute(
+            "INSERT INTO site_audit_log (action, field, new_value, done_by) VALUES ($1,$2,$3,$4)",
+            "contact_form", req.email,
+            f"name={req.name} | phone={req.phone} | product={req.product_id} | msg={req.message[:200]}",
+            "visitor"
+        )
+    finally:
+        await conn.close()
+    return {"ok": True, "message": "Demande enregistrée"}
+
+
+# ── Cron scraper tob.pt ───────────────────────────────────────────────────────
+
+TOB_SCRAPE_INTERVAL_H = int(os.getenv("TOB_SCRAPE_INTERVAL_H", "24"))
+
+async def _scrape_tob_once(max_items: int = 200) -> dict:
+    """Scrape tob.pt et insère les nouveaux produits. Retourne un résumé."""
     listing_url = "https://www.tob.pt/pt/machinery.aspx"
     base_url = "https://www.tob.pt"
+    inserted = []
+    errors = []
 
     async with httpx.AsyncClient(
         timeout=30.0,
@@ -407,13 +426,11 @@ async def import_from_tob(body: dict = {}):
         try:
             resp = await client.get(listing_url)
             if resp.status_code != 200:
-                return {"ok": False, "inserted": 0, "items": [], "errors": [f"tob.pt HTTP {resp.status_code}"]}
+                return {"ok": False, "inserted": 0, "errors": [f"tob.pt HTTP {resp.status_code}"]}
             html = resp.text
         except Exception as e:
-            return {"ok": False, "inserted": 0, "items": [], "errors": [f"Connexion tob.pt: {str(e)[:100]}"]}
+            return {"ok": False, "inserted": 0, "errors": [f"Connexion tob.pt: {str(e)[:100]}"]}
 
-        # Extraction directe par regex simples sur le HTML complet
-        # IDs dédupliqués dans l'ordre d'apparition
         all_ids = re.findall(r'Detail\.aspx\?MaquinaID=(\d+)', html)
         seen_ids: dict = {}
         for mid in all_ids:
@@ -447,7 +464,6 @@ async def import_from_tob(body: dict = {}):
                 source_url = f"{base_url}/pt/Detail.aspx?MaquinaID={mid}"
                 image_url = f"{base_url}/Handler.ashx?MaquinaID={mid}&Size=S"
 
-                # Skip si déjà importé
                 existing = await conn.fetchval(
                     "SELECT id FROM site_products WHERE source_url=$1", source_url
                 )
@@ -465,33 +481,35 @@ async def import_from_tob(body: dict = {}):
                     json.dumps([image_url]),
                     f"Importé depuis tob.pt (MaquinaID={mid}). Prix sur demande."
                 )
-                inserted.append({"id": str(pid), "title": title, "year": year, "source_url": source_url})
-                logger.info(f"tob.pt import: {title} ({mid})")
+                inserted.append({"id": str(pid), "title": title})
+                logger.info(f"[tob-cron] nouveau: {title} ({mid})")
         finally:
             await conn.close()
 
-    return {"ok": True, "inserted": len(inserted), "items": inserted, "errors": errors}
+    return {"ok": True, "inserted": len(inserted), "errors": errors}
 
-# ── Contact / devis ───────────────────────────────────────────────────────────
 
-class ContactRequest(BaseModel):
-    name: str
-    email: str
-    phone: str = None
-    lang: str = "fr"
-    product_id: str = None
-    message: str = ""
+async def tob_scraper_cron():
+    """Lance un scrape tob.pt toutes les TOB_SCRAPE_INTERVAL_H heures."""
+    logger.info(f"[tob-cron] démarré — intervalle {TOB_SCRAPE_INTERVAL_H}h")
+    while True:
+        try:
+            result = await _scrape_tob_once()
+            logger.info(f"[tob-cron] scrape terminé — {result.get('inserted', 0)} nouveaux produits")
+        except Exception as e:
+            logger.error(f"[tob-cron] erreur: {e}")
+        await asyncio.sleep(TOB_SCRAPE_INTERVAL_H * 3600)
 
-@app.post("/api/site/contact")
-async def submit_contact(req: ContactRequest):
-    conn = await db_connect()
-    try:
-        await conn.execute(
-            "INSERT INTO site_audit_log (action, field, new_value, done_by) VALUES ($1,$2,$3,$4)",
-            "contact_form", req.email,
-            f"name={req.name} | phone={req.phone} | product={req.product_id} | msg={req.message[:200]}",
-            "visitor"
-        )
-    finally:
-        await conn.close()
-    return {"ok": True, "message": "Demande enregistrée"}
+
+@app.post("/api/site/scraper/run")
+async def run_scraper_now(body: dict = {}):
+    """Déclenche un scrape immédiat de tob.pt (sans attendre le cron)."""
+    max_items = body.get("max_items", 200)
+    result = await _scrape_tob_once(max_items=max_items)
+    return result
+
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(tob_scraper_cron())
+    logger.info("LEGA Site API started — cron scraper tob.pt actif")
