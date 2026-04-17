@@ -6,8 +6,13 @@ const stripEmoji = (s: string) =>
    .replace(/\s{2,}/g, " ").trim();
 
 // ── Config ─────────────────────────────────────────────────────────────────
-const SITE_API = process.env.NEXT_PUBLIC_SITE_API_URL || "http://76.13.141.221:8003/api/site";
-const BVI_WS   = process.env.NEXT_PUBLIC_BVI_WS_URL   || "ws://76.13.141.221:8002/ws/stream";
+const SITE_API  = process.env.NEXT_PUBLIC_SITE_API_URL  || "http://76.13.141.221:8003/api/site";
+const SITE_BASE = process.env.NEXT_PUBLIC_SITE_BASE_URL || "http://76.13.141.221:8003";
+const BVI_WS    = process.env.NEXT_PUBLIC_BVI_WS_URL    || "ws://76.13.141.221:8002/ws/stream";
+
+// Résout les URLs /uploads/... stockées en DB vers une URL absolue
+const assetUrl = (v: string | undefined) =>
+  v ? (v.startsWith("http") ? v : `${SITE_BASE}${v}`) : undefined;
 
 const LANGS = [
   { code: "pt", label: "PT", dir: "ltr" },
@@ -232,9 +237,9 @@ export default function LegaSite() {
         boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
       })}>
         <div style={s({ display: "flex", alignItems: "center", gap: 16 })}>
-          {cfg["logo_url"] ? (
+          {assetUrl(cfg["logo"]) ? (
             /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={cfg["logo_url"]} alt="LEGA.PT" style={s({ height: 36, objectFit: "contain" })} />
+            <img src={assetUrl(cfg["logo"])} alt="LEGA.PT" style={s({ height: 36, objectFit: "contain" })} />
           ) : (
             <span style={s({ fontWeight: 800, fontSize: 22, letterSpacing: "-0.5px" })}>
               <span style={s({ color: C2 })}>LEGA</span>.PT
@@ -265,7 +270,7 @@ export default function LegaSite() {
 
       {/* ── HERO ────────────────────────────────────────────────────────── */}
       <section id="home" style={s({
-        background: `linear-gradient(rgba(27,63,110,0.72) 0%, rgba(27,63,110,0.5) 100%), url('https://images.unsplash.com/photo-1558618047-3c8c76ca7d13?w=1600&q=80') center/cover no-repeat`,
+        background: `linear-gradient(rgba(27,63,110,0.72) 0%, rgba(27,63,110,0.5) 100%), url('${assetUrl(cfg["hero"]) || "https://images.unsplash.com/photo-1558618047-3c8c76ca7d13?w=1600&q=80"}') center/cover no-repeat`,
         color: "#fff", padding: "100px 24px 80px", textAlign: "center",
         minHeight: 480, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       })}>
