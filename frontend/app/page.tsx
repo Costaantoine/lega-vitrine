@@ -22,9 +22,6 @@ const LANGS = [
 
 const CATEGORIES = ["machines_tp", "trucks", "trailers", "vans"];
 
-// Couleurs
-const C1 = "#1B3F6E"; // bleu marine
-const C2 = "#E8641E"; // orange
 
 // ── i18n ───────────────────────────────────────────────────────────────────
 type Dict = Record<string, string>;
@@ -218,6 +215,8 @@ export default function LegaSite() {
 
   const T = (k: string) => t[k] || k;
   const slogan = cfg[`slogan_${lang}`] || cfg["slogan_pt"] || "Equipamentos que movem o mundo";
+  const C1 = cfg["color_primary"] || "#1B3F6E";
+  const C2 = cfg["color_secondary"] || "#E8641E";
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
