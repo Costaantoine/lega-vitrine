@@ -148,9 +148,13 @@ export default function LegaSite() {
       setChatOpen(true);
       setChatMsgs([{ role: "assistant", text: WELCOME[lang] || WELCOME["fr"] }]);
     }
-    if (ws) return;
+    if (ws?.readyState === WebSocket.OPEN) return;
+    if (ws) { try { ws.close(); } catch {} setWs(null); }
     const sid = `lega-vitrine-${Date.now()}`;
     const socket = new WebSocket(`${BVI_WS}?session_id=${sid}&preferred_agent=standardiste`);
+    const handleDisconnect = () => setWs(null);
+    socket.onclose = handleDisconnect;
+    socket.onerror = handleDisconnect;
     const playNext = (ctx: AudioContext) => {
       if (audioPlayingRef.current || audioQueueRef.current.length === 0) return;
       audioPlayingRef.current = true;
@@ -207,7 +211,8 @@ export default function LegaSite() {
   };
 
   const sendChat = () => {
-    if (!chatInput.trim() || !ws) return;
+    if (!chatInput.trim()) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) { openChat(); return; }
     setChatMsgs(prev => [...prev, { role: "user", text: chatInput }]);
     ws.send(JSON.stringify({ payload: chatInput, lang, preferred_agent: "vitrine_bot" }));
     setChatInput("");
@@ -274,7 +279,7 @@ export default function LegaSite() {
 
       {/* ── HERO ────────────────────────────────────────────────────────── */}
       <section id="home" style={s({
-        background: `linear-gradient(rgba(27,63,110,0.72) 0%, rgba(27,63,110,0.5) 100%), url('${assetUrl(cfg["hero"]) || "https://images.unsplash.com/photo-1558618047-3c8c76ca7d13?w=1600&q=80"}') center/cover no-repeat`,
+        background: `linear-gradient(rgba(27,63,110,0.72) 0%, rgba(27,63,110,0.5) 100%), url('${assetUrl(cfg["hero"]) || "https://images.unsplash.com/photo-1747004175907-e64576ba2e22?w=1600&q=80"}') center/cover no-repeat`,
         color: "#fff", padding: "100px 24px 80px", textAlign: "center",
         minHeight: 480, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       })}>
