@@ -65,6 +65,9 @@ interface Product {
   year: number; hours: number; price: number; currency: string;
   location: string; description: string; images: string[]; status: string; reference: string;
 }
+interface DocNode { name: string; path: string; type: "file"|"directory"; ext?: string; children?: DocNode[] }
+interface DocContent { type: "text"|"pdf"; name: string; content?: string; path: string; size?: number }
+interface SiteClient { id: string; name: string; email: string; company?: string; lang: string }
 
 // ── Styles helper ──────────────────────────────────────────────────────────
 const s = (styles: React.CSSProperties): React.CSSProperties => styles;
@@ -92,9 +95,72 @@ export default function LegaSite() {
   const [selectedProduct, setSelectedProduct] = useState<Product|null>(null);
   const [quoteProductId, setQuoteProductId] = useState<string|null>(null);
   const [quoteProductTitle, setQuoteProductTitle] = useState<string|null>(null);
+  // Docs + auth
+  const [client, setClient]           = useState<SiteClient|null>(null);
+  const [docsView, setDocsView]       = useState(false);
+  const [loginOpen, setLoginOpen]     = useState(false);
+  const [loginMode, setLoginMode]     = useState<"login"|"register">("login");
+  const [loginForm, setLoginForm]     = useState({email:"",password:"",name:"",company:""});
+  const [loginError, setLoginError]   = useState("");
+  const [docsTree, setDocsTree]       = useState<DocNode[]>([]);
+  const [selectedDoc, setSelectedDoc] = useState<DocNode|null>(null);
+  const [docContent, setDocContent]   = useState<DocContent|null>(null);
+  const [dlReqOpen, setDlReqOpen]     = useState(false);
+  const [dlReqForm, setDlReqForm]     = useState({client_name:"",client_email:"",client_company:"",motif:""});
+  const [dlReqSent, setDlReqSent]     = useState(false);
 
   // Sync TTS ref
   useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
+
+  // Restaurer session client
+  useEffect(() => {
+    try {
+      const sc = localStorage.getItem("lega_client");
+      if (sc) { setClient(JSON.parse(sc)); }
+    } catch {}
+  }, []);
+
+  // Pré-remplir form download quand client connecté
+  useEffect(() => {
+    if (client) setDlReqForm(f => ({ ...f, client_name: client.name||"", client_email: client.email, client_company: client.company||"" }));
+  }, [client]);
+
+  const loadDocsTree = async () => {
+    try { const d = await (await fetch(`${SITE_API}/docs`)).json(); setDocsTree(d.tree||[]); } catch {}
+  };
+  const loadDocContent = async (node: DocNode) => {
+    setSelectedDoc(node); setDocContent(null);
+    try { const d = await (await fetch(`${SITE_API}/docs/content?path=${encodeURIComponent(node.path)}`)).json(); setDocContent(d); } catch {}
+  };
+  const openDocs = () => {
+    if (!client) { setLoginOpen(true); return; }
+    setDocsView(true);
+    if (docsTree.length === 0) loadDocsTree();
+    setTimeout(() => document.getElementById("docs")?.scrollIntoView({ behavior: "smooth" }), 100);
+  };
+  const loginClient = async () => {
+    setLoginError("");
+    try {
+      const r = await fetch(`${SITE_API}/auth/login`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({email:loginForm.email,password:loginForm.password}) });
+      if (!r.ok) { setLoginError("Email ou mot de passe incorrect"); return; }
+      const d = await r.json();
+      setClient(d.client); localStorage.setItem("lega_client", JSON.stringify(d.client));
+      setLoginOpen(false); setDocsView(true); loadDocsTree();
+      setTimeout(() => document.getElementById("docs")?.scrollIntoView({ behavior: "smooth" }), 200);
+    } catch { setLoginError("Erreur de connexion"); }
+  };
+  const registerClient = async () => {
+    setLoginError("");
+    try {
+      const r = await fetch(`${SITE_API}/auth/register`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(loginForm) });
+      if (!r.ok) { const e = await r.json(); setLoginError(e.detail||"Erreur d'inscription"); return; }
+      await loginClient();
+    } catch { setLoginError("Erreur d'inscription"); }
+  };
+  const submitDlReq = async () => {
+    if (!selectedDoc) return;
+    try { await fetch(`${SITE_API}/docs/request`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({doc_path:selectedDoc.path,...dlReqForm}) }); setDlReqSent(true); } catch {}
+  };
 
   // Charger langue
   useEffect(() => {
@@ -261,6 +327,16 @@ export default function LegaSite() {
                 {T(k)}
               </a>
             ))}
+            <button onClick={openDocs} style={s({ color: docsView ? "#fff" : "rgba(255,255,255,0.8)", background: docsView ? C2 : "rgba(255,255,255,0.12)", border: "none", fontSize: 14, padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontWeight: docsView ? 700 : 400 })}>
+              {client ? "📄 Docs" : "📄 Documentation"}
+            </button>
+            {client && (
+              <span style={s({ color: "rgba(255,255,255,0.6)", fontSize: 12, marginInlineStart: 4 })}>
+                {client.name || client.email}
+                <button onClick={() => { setClient(null); localStorage.removeItem("lega_client"); setDocsView(false); }}
+                  style={s({ background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 11, marginInlineStart: 6 })}>✕</button>
+              </span>
+            )}
           </div>
         </div>
         <div style={s({ display: "flex", alignItems: "center", gap: 8 })}>
@@ -366,6 +442,55 @@ export default function LegaSite() {
           </div>
         )}
       </section>
+
+      {/* ── DOCUMENTATION ───────────────────────────────────────────────── */}
+      {docsView && client && (
+        <section id="docs" style={s({ maxWidth: 1200, margin: "0 auto", padding: "60px 24px" })}>
+          <h2 style={s({ fontSize: 28, fontWeight: 700, color: C1, marginBottom: 8 })}>Documentation technique</h2>
+          <p style={s({ color: "#64748b", marginBottom: 28 })}>Connecté : {client.name || client.email}</p>
+          <div style={s({ display: "grid", gridTemplateColumns: "280px 1fr", gap: 24, minHeight: 500 })}>
+            {/* Arborescence */}
+            <div style={s({ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16, overflowY: "auto" })}>
+              <div style={s({ fontWeight: 700, fontSize: 13, color: C1, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.06em" })}>Documents</div>
+              <DocTree nodes={docsTree} onSelect={loadDocContent} selected={selectedDoc} c2={C2} />
+            </div>
+            {/* Visionneuse */}
+            <div style={s({ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 24, overflowY: "auto" })}>
+              {!selectedDoc && <div style={s({ color: "#94a3b8", textAlign: "center", paddingTop: 80, fontSize: 15 })}>Sélectionnez un document dans l&apos;arborescence</div>}
+              {selectedDoc && !docContent && <div style={s({ color: "#94a3b8", textAlign: "center", paddingTop: 80 })}>Chargement…</div>}
+              {docContent && (
+                <>
+                  <div style={s({ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 8 })}>
+                    <h3 style={s({ margin: 0, fontSize: 18, fontWeight: 700, color: C1 })}>{docContent.name}</h3>
+                    <button onClick={() => { setDlReqOpen(true); setDlReqSent(false); }}
+                      style={s({ background: C2, color: "#fff", border: "none", padding: "8px 18px", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 13 })}>
+                      Demander le téléchargement
+                    </button>
+                  </div>
+                  {docContent.type === "text" && docContent.content && (
+                    <pre style={s({ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 14, lineHeight: 1.7, color: "#334155", margin: 0 })}>{docContent.content}</pre>
+                  )}
+                  {docContent.type === "pdf" && (
+                    <div style={s({ background: "#f1f5f9", borderRadius: 8, padding: 24, textAlign: "center", color: "#475569" })}>
+                      <div style={s({ fontSize: 48, marginBottom: 12 })}>📄</div>
+                      <p>Fichier PDF ({docContent.size ? `${Math.round(docContent.size/1024)} Ko` : ""})</p>
+                      <p style={s({ fontSize: 13 })}>Cliquez sur &quot;Demander le téléchargement&quot; pour recevoir ce document.</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+      {!docsView && (
+        <section style={s({ background: "#f1f5f9", padding: "40px 24px", textAlign: "center" })}>
+          <p style={s({ color: "#475569", fontSize: 15, margin: "0 0 16px" })}>Accédez à notre documentation technique complète (manuels, fiches machines, réglementation)</p>
+          <button onClick={openDocs} style={s({ background: C1, color: "#fff", border: "none", padding: "12px 28px", borderRadius: 8, fontWeight: 700, cursor: "pointer" })}>
+            {client ? "Voir la documentation" : "Se connecter pour accéder aux docs"}
+          </button>
+        </section>
+      )}
 
       {/* ── AI BANNER ───────────────────────────────────────────────────── */}
       <section style={s({
@@ -511,6 +636,61 @@ export default function LegaSite() {
             setTimeout(() => document.getElementById("contact")?.scrollIntoView({ behavior: "smooth" }), 100);
           }} />
       )}
+
+      {/* ── MODAL LOGIN CLIENT ──────────────────────────────────────────── */}
+      {loginOpen && (
+        <div style={s({ position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16 })} onClick={() => setLoginOpen(false)}>
+          <div style={s({ background:"#fff",borderRadius:16,padding:32,maxWidth:400,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.2)" })} onClick={e => e.stopPropagation()}>
+            <h3 style={s({ margin:"0 0 4px",fontSize:20,fontWeight:700,color:C1 })}>{loginMode==="login" ? "Connexion" : "Créer un compte"}</h3>
+            <p style={s({ color:"#64748b",fontSize:13,margin:"0 0 20px" })}>Accès à la documentation technique LEGA</p>
+            {loginMode==="register" && <>
+              <input placeholder="Nom complet" value={loginForm.name} onChange={e=>setLoginForm(f=>({...f,name:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+              <input placeholder="Société" value={loginForm.company} onChange={e=>setLoginForm(f=>({...f,company:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+            </>}
+            <input type="email" placeholder="Email" value={loginForm.email} onChange={e=>setLoginForm(f=>({...f,email:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+            <input type="password" placeholder="Mot de passe" value={loginForm.password} onChange={e=>setLoginForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&(loginMode==="login"?loginClient():registerClient())} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+            {loginError && <p style={s({color:"#ef4444",fontSize:13,margin:"0 0 10px"})}>{loginError}</p>}
+            <button onClick={loginMode==="login"?loginClient:registerClient} style={s({width:"100%",padding:"12px",background:C1,color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:15,cursor:"pointer",marginBottom:12})}>
+              {loginMode==="login" ? "Se connecter" : "Créer le compte"}
+            </button>
+            <p style={s({textAlign:"center",fontSize:13,color:"#64748b",margin:0})}>
+              {loginMode==="login" ? "Pas encore de compte ? " : "Déjà un compte ? "}
+              <button onClick={()=>{setLoginMode(loginMode==="login"?"register":"login");setLoginError("");}} style={s({background:"none",border:"none",color:C2,cursor:"pointer",fontWeight:700,fontSize:13})}>
+                {loginMode==="login" ? "Créer un compte" : "Se connecter"}
+              </button>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DEMANDE TÉLÉCHARGEMENT ─────────────────────────────────── */}
+      {dlReqOpen && (
+        <div style={s({ position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16 })} onClick={() => setDlReqOpen(false)}>
+          <div style={s({ background:"#fff",borderRadius:16,padding:32,maxWidth:440,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.2)" })} onClick={e => e.stopPropagation()}>
+            {dlReqSent ? (
+              <div style={s({textAlign:"center",padding:"20px 0"})}>
+                <div style={s({fontSize:48,marginBottom:12})}>✅</div>
+                <h3 style={s({color:C1,margin:"0 0 8px"})}>Demande envoyée</h3>
+                <p style={s({color:"#64748b",fontSize:14})}>Notre équipe examinera votre demande et vous contactera sous 24h.</p>
+                <button onClick={()=>setDlReqOpen(false)} style={s({marginTop:16,padding:"10px 24px",background:C1,color:"#fff",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"})}>Fermer</button>
+              </div>
+            ) : (
+              <>
+                <h3 style={s({margin:"0 0 4px",fontSize:18,fontWeight:700,color:C1})}>Demander le téléchargement</h3>
+                <p style={s({color:"#64748b",fontSize:13,margin:"0 0 20px"})}>{selectedDoc?.name}</p>
+                <input placeholder="Nom complet *" value={dlReqForm.client_name} onChange={e=>setDlReqForm(f=>({...f,client_name:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+                <input type="email" placeholder="Email *" value={dlReqForm.client_email} onChange={e=>setDlReqForm(f=>({...f,client_email:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+                <input placeholder="Société" value={dlReqForm.client_company} onChange={e=>setDlReqForm(f=>({...f,client_company:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+                <textarea placeholder="Motif de la demande" value={dlReqForm.motif} onChange={e=>setDlReqForm(f=>({...f,motif:e.target.value}))} rows={3} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:16,resize:"vertical",boxSizing:"border-box"})} />
+                <div style={s({display:"flex",gap:8})}>
+                  <button onClick={()=>setDlReqOpen(false)} style={s({flex:1,padding:"11px",border:"1px solid #e2e8f0",borderRadius:8,background:"#fff",cursor:"pointer",fontWeight:600})}>Annuler</button>
+                  <button onClick={submitDlReq} style={s({flex:2,padding:"11px",background:C2,color:"#fff",border:"none",borderRadius:8,fontWeight:700,cursor:"pointer"})}>Envoyer la demande</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -610,6 +790,39 @@ function ProductModal({ product: p, t, c1, c2, onClose, onQuote }:
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── DocTree ──────────────────────────────────────────────────────────────────
+function DocTree({ nodes, onSelect, selected, c2, depth=0 }:
+  { nodes: DocNode[]; onSelect:(n:DocNode)=>void; selected:DocNode|null; c2:string; depth?:number }) {
+  return (
+    <div style={{ marginLeft: depth*12 }}>
+      {nodes.map(n => (
+        <div key={n.path}>
+          {n.type === "directory" ? (
+            <>
+              <div style={{ fontSize:13, fontWeight:600, color:"#475569", padding:"5px 4px", display:"flex", alignItems:"center", gap:6 }}>
+                <span>&#128193;</span>{n.name}
+              </div>
+              {n.children && n.children.length > 0 && (
+                <DocTree nodes={n.children} onSelect={onSelect} selected={selected} c2={c2} depth={depth+1} />
+              )}
+            </>
+          ) : (
+            <button onClick={() => onSelect(n)} style={{
+              display:"block", width:"100%", textAlign:"left", padding:"5px 8px",
+              border:"none", borderRadius:6, cursor:"pointer", fontSize:13,
+              background: selected?.path===n.path ? c2 : "transparent",
+              color: selected?.path===n.path ? "#fff" : "#334155",
+              marginBottom:2,
+            }}>
+              {n.ext===".pdf" ? "\uD83D\uDCC4" : "\uD83D\uDCDD"} {n.name}
+            </button>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
