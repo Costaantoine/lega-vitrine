@@ -15,8 +15,18 @@ services:
     environment:
       DATABASE_URL: postgresql://bvi_user:BviSecure2026!@bvi-db-1:5432/bvi_db
       BVI_API_URL: http://bvi-api-1:8000
+      DOCS_BASE_PATH: /app/docs
+      SITE_BASE_URL: http://76.13.141.221:8003
+      TELEGRAM_BOT_TOKEN: "8651107506:AAHQsRBvh8DpyPq_xBw1_YIcKTE6tdRAeUk"
+      TELEGRAM_CHAT_ID: "8070870984"
+      SMTP_FROM: escritorio.ai.lega@gmail.com
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_PASSWORD: "ojkb iask hwfq itli"
+      JWT_SECRET_CLIENT: "lega-client-jwt-2026"
     volumes:
       - ./frontend/public/uploads:/app/uploads
+      - /opt/bvi/docs:/app/docs:ro
     networks:
       - lega-net
       - bvi-net

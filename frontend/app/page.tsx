@@ -214,7 +214,7 @@ export default function LegaSite() {
     if (!chatInput.trim()) return;
     if (!ws || ws.readyState !== WebSocket.OPEN) { openChat(); return; }
     setChatMsgs(prev => [...prev, { role: "user", text: chatInput }]);
-    ws.send(JSON.stringify({ payload: chatInput, lang, preferred_agent: "vitrine_bot" }));
+    ws.send(JSON.stringify({ payload: chatInput, lang, preferred_agent: "lea", canal: "web" }));
     setChatInput("");
   };
 

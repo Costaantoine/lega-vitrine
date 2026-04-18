@@ -1,17 +1,24 @@
 import asyncpg
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
+import smtplib
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pathlib import Path
 
 import aiofiles
 import httpx
+import jwt
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -23,6 +30,16 @@ logger = logging.getLogger(__name__)
 
 DB_URL = os.getenv("DATABASE_URL", "postgresql://bvi_user:BviSecure2026!@bvi-db:5432/bvi_db")
 BVI_API_URL = os.getenv("BVI_API_URL", "http://bvi-api-1:8000")
+
+DOCS_PATH = Path(os.getenv("DOCS_BASE_PATH", "/app/docs"))
+SITE_BASE_URL = os.getenv("SITE_BASE_URL", "http://76.13.141.221:8003")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+JWT_SECRET_CLIENT = os.getenv("JWT_SECRET_CLIENT", "lega-client-secret-2026")
 
 app = FastAPI(title="LEGA Site API", version="1.0.0")
 app.mount("/uploads", StaticFiles(directory="/app/uploads"), name="uploads")
@@ -37,6 +54,40 @@ app.add_middleware(
 
 async def db_connect():
     return await asyncpg.connect(DB_URL)
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+async def notify_telegram(text: str) -> None:
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            await c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"})
+    except Exception as e:
+        logger.warning(f"Telegram notify error: {e}")
+
+
+def _smtp_send(to_addr: str, subject: str, html_body: str) -> None:
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_addr
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+        s.ehlo(); s.starttls(); s.login(SMTP_FROM, SMTP_PASSWORD)
+        s.sendmail(SMTP_FROM, [to_addr], msg.as_string())
+
+
+async def send_email(to_addr: str, subject: str, html_body: str) -> None:
+    if not (SMTP_FROM and SMTP_PASSWORD):
+        return
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, _smtp_send, to_addr, subject, html_body)
+    except Exception as e:
+        logger.error(f"Email error to {to_addr}: {e}")
 
 
 # ── Pydantic ──────────────────────────────────────────────────────────────────
@@ -516,6 +567,242 @@ async def run_scraper_now(body: dict = {}):
     max_items = body.get("max_items", 200)
     result = await _scrape_tob_once(max_items=max_items)
     return result
+
+
+# ── Documentation — liste arborescente ───────────────────────────────────────
+
+def _build_docs_tree(base: Path, current: Path) -> dict:
+    node: dict = {"name": current.name, "path": str(current.relative_to(base)), "type": "directory", "children": []}
+    for item in sorted(current.iterdir()):
+        if item.name.startswith("."):
+            continue
+        if item.is_dir():
+            node["children"].append(_build_docs_tree(base, item))
+        elif item.suffix.lower() in {".pdf", ".md", ".txt"}:
+            node["children"].append({
+                "name": item.name,
+                "path": str(item.relative_to(base)),
+                "type": "file",
+                "ext": item.suffix.lower(),
+            })
+    return node
+
+
+@app.get("/api/site/docs")
+async def get_docs_list():
+    if not DOCS_PATH.exists():
+        return {"tree": []}
+    root = _build_docs_tree(DOCS_PATH, DOCS_PATH)
+    return {"tree": root["children"]}
+
+
+@app.get("/api/site/docs/content")
+async def get_doc_content(path: str):
+    safe = (DOCS_PATH / path.lstrip("/")).resolve()
+    if not str(safe).startswith(str(DOCS_PATH.resolve())):
+        raise HTTPException(400, "Chemin invalide")
+    if not safe.exists():
+        raise HTTPException(404, "Document introuvable")
+    if safe.suffix.lower() == ".pdf":
+        return {"type": "pdf", "name": safe.name, "size": safe.stat().st_size, "path": path}
+    if safe.suffix.lower() in {".md", ".txt"}:
+        content = safe.read_text(encoding="utf-8")
+        return {"type": "text", "name": safe.name, "content": content, "path": path}
+    raise HTTPException(400, "Format non supporté")
+
+
+# ── Documentation — demandes de téléchargement ────────────────────────────────
+
+class DocDownloadReq(BaseModel):
+    doc_path: str
+    client_name: str
+    client_email: str
+    client_company: str = None
+    motif: str = None
+
+
+@app.post("/api/site/docs/request")
+async def create_doc_request(req: DocDownloadReq):
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow(
+            "INSERT INTO doc_download_requests (doc_path,client_name,client_email,client_company,motif) "
+            "VALUES ($1,$2,$3,$4,$5) RETURNING id",
+            req.doc_path, req.client_name, req.client_email, req.client_company, req.motif
+        )
+        rid = row["id"]
+        await notify_telegram(
+            f"📄 *Demande téléchargement doc #{rid}*\n"
+            f"Fichier: `{req.doc_path}`\n"
+            f"Client: {req.client_name} ({req.client_email})\n"
+            f"Société: {req.client_company or 'N/A'}\n"
+            f"Motif: {req.motif or 'N/A'}\n"
+            f"Dashboard → http://76.13.141.221:3000"
+        )
+        await send_email(
+            req.client_email,
+            "LEGA.PT — Demande de téléchargement reçue",
+            f"<p>Bonjour {req.client_name},</p>"
+            f"<p>Votre demande de téléchargement pour <strong>{req.doc_path}</strong> a bien été reçue.</p>"
+            f"<p>Notre équipe l'examinera et vous contactera sous 24h.</p>"
+            f"<p>Cordialement,<br/><strong>L'équipe LEGA.PT</strong></p>"
+        )
+        return {"ok": True, "id": rid}
+    finally:
+        await conn.close()
+
+
+@app.get("/api/site/docs/requests")
+async def list_doc_requests(status: str = None):
+    conn = await db_connect()
+    try:
+        if status:
+            rows = await conn.fetch(
+                "SELECT * FROM doc_download_requests WHERE status=$1 ORDER BY created_at DESC", status
+            )
+        else:
+            rows = await conn.fetch("SELECT * FROM doc_download_requests ORDER BY created_at DESC")
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+@app.post("/api/site/docs/requests/{rid}/approve")
+async def approve_doc_request(rid: int):
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow("SELECT * FROM doc_download_requests WHERE id=$1", rid)
+        if not row:
+            raise HTTPException(404, "Demande introuvable")
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+        await conn.execute(
+            "UPDATE doc_download_requests SET status='approved', download_token=$1, "
+            "token_expires_at=$2, reviewed_at=NOW() WHERE id=$3",
+            token, expires_at, rid
+        )
+        dl_url = f"{SITE_BASE_URL}/api/site/docs/download/{token}"
+        await send_email(
+            row["client_email"],
+            "LEGA.PT — Téléchargement approuvé",
+            f"<p>Bonjour {row['client_name']},</p>"
+            f"<p>Votre demande de téléchargement a été approuvée.</p>"
+            f"<p><a href='{dl_url}' style='background:#1B3F6E;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;'>Télécharger le document</a></p>"
+            f"<p><em>Lien valable 24 heures.</em></p>"
+            f"<p>Cordialement,<br/><strong>L'équipe LEGA.PT</strong></p>"
+        )
+        return {"ok": True, "token": token, "expires_at": expires_at.isoformat(), "download_url": dl_url}
+    finally:
+        await conn.close()
+
+
+@app.post("/api/site/docs/requests/{rid}/reject")
+async def reject_doc_request(rid: int, body: dict = {}):
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow("SELECT * FROM doc_download_requests WHERE id=$1", rid)
+        if not row:
+            raise HTTPException(404, "Demande introuvable")
+        await conn.execute(
+            "UPDATE doc_download_requests SET status='rejected', reviewed_at=NOW() WHERE id=$1", rid
+        )
+        reason = body.get("reason", "")
+        await send_email(
+            row["client_email"],
+            "LEGA.PT — Votre demande de téléchargement",
+            f"<p>Bonjour {row['client_name']},</p>"
+            f"<p>Nous ne sommes pas en mesure d'accéder à votre demande de téléchargement pour le moment.</p>"
+            f"{f'<p>{reason}</p>' if reason else ''}"
+            f"<p>N'hésitez pas à nous contacter directement pour plus d'informations.</p>"
+            f"<p>Cordialement,<br/><strong>L'équipe LEGA.PT</strong></p>"
+        )
+        return {"ok": True}
+    finally:
+        await conn.close()
+
+
+@app.get("/api/site/docs/download/{token}")
+async def download_with_token(token: str):
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow(
+            "SELECT * FROM doc_download_requests WHERE download_token=$1 AND status='approved'", token
+        )
+        if not row:
+            raise HTTPException(404, "Lien invalide ou expiré")
+        if row["token_expires_at"] < datetime.now(timezone.utc):
+            raise HTTPException(410, "Lien expiré")
+        doc = (DOCS_PATH / row["doc_path"].lstrip("/")).resolve()
+        if not str(doc).startswith(str(DOCS_PATH.resolve())):
+            raise HTTPException(400, "Chemin invalide")
+        if not doc.exists():
+            raise HTTPException(404, "Fichier introuvable sur le serveur")
+        return FileResponse(path=str(doc), filename=doc.name, media_type="application/octet-stream")
+    finally:
+        await conn.close()
+
+
+# ── Auth clients vitrine ──────────────────────────────────────────────────────
+
+@app.post("/api/site/auth/register")
+async def register_client(body: dict):
+    email = (body.get("email") or "").lower().strip()
+    password = body.get("password") or ""
+    name = body.get("name") or ""
+    company = body.get("company") or ""
+    lang = body.get("lang") or "fr"
+    if not email or not password:
+        raise HTTPException(400, "Email et mot de passe requis")
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    conn = await db_connect()
+    try:
+        try:
+            row = await conn.fetchrow(
+                "INSERT INTO site_clients (email,name,company,password_hash,lang) "
+                "VALUES ($1,$2,$3,$4,$5) RETURNING id",
+                email, name, company, pw_hash, lang
+            )
+        except Exception:
+            raise HTTPException(409, "Email déjà utilisé")
+        return {"ok": True, "id": str(row["id"])}
+    finally:
+        await conn.close()
+
+
+@app.post("/api/site/auth/login")
+async def login_client(body: dict):
+    email = (body.get("email") or "").lower().strip()
+    password = body.get("password") or ""
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow(
+            "SELECT id,name,email,company,lang FROM site_clients "
+            "WHERE email=$1 AND password_hash=$2",
+            email, pw_hash
+        )
+        if not row:
+            raise HTTPException(401, "Email ou mot de passe incorrect")
+        token = jwt.encode(
+            {"sub": str(row["id"]), "email": row["email"], "exp": datetime.now(timezone.utc) + timedelta(days=30)},
+            JWT_SECRET_CLIENT, algorithm="HS256"
+        )
+        return {
+            "ok": True, "token": token,
+            "client": {"id": str(row["id"]), "name": row["name"], "email": row["email"],
+                       "company": row["company"], "lang": row["lang"]},
+        }
+    finally:
+        await conn.close()
+
+
+@app.get("/api/site/auth/verify")
+async def verify_client_token(token: str):
+    try:
+        payload = jwt.decode(token, JWT_SECRET_CLIENT, algorithms=["HS256"])
+        return {"ok": True, "client_id": payload["sub"], "email": payload["email"]}
+    except Exception:
+        raise HTTPException(401, "Token invalide ou expiré")
 
 
 @app.on_event("startup")
