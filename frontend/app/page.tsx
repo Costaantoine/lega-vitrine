@@ -81,6 +81,9 @@ export default function LegaSite() {
   const [total, setTotal]       = useState(0);
   const [catFilter, setCatFilter] = useState("");
   const [searchQ, setSearchQ]     = useState("");
+  const [prodOffset, setProdOffset] = useState(0);
+  const [hasMore, setHasMore]       = useState(false);
+  const PROD_LIMIT = 12;
   const [chatOpen, setChatOpen]   = useState(false);
   const [chatMsgs, setChatMsgs]   = useState<{role:string; text:string; streaming?:boolean}[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -90,6 +93,8 @@ export default function LegaSite() {
   const audioQueueRef = useRef<AudioBuffer[]>([]);
   const audioPlayingRef = useRef(false);
   const [ws, setWs]               = useState<WebSocket|null>(null);
+  const [leaStatus, setLeaStatus] = useState<'waiting'|'thinking'|'done'|null>(null);
+  const [leaThinkText, setLeaThinkText] = useState('');
   const [contactForm, setContactForm] = useState({ name:"", email:"", phone:"", message:"" });
   const [contactSent, setContactSent] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product|null>(null);
@@ -184,16 +189,26 @@ export default function LegaSite() {
   }, []);
 
   // Charger produits
-  const fetchProducts = useCallback(() => {
-    let url = `${SITE_API}/products?limit=12&status=available`;
+  const fetchProducts = useCallback((offset = 0, append = false) => {
+    // Quand un filtre catégorie est actif, on charge tout d'un coup (pas de pagination)
+    const limit = catFilter ? 999 : PROD_LIMIT;
+    let url = `${SITE_API}/products?limit=${limit}&offset=${offset}&status=available`;
     if (catFilter) url += `&category=${catFilter}`;
     fetch(url)
       .then(r => r.json())
-      .then(d => { setProducts(d.items || []); setTotal(d.total || 0); })
+      .then(d => {
+        const items = d.items || [];
+        const tot   = d.total || 0;
+        setProducts(prev => append ? [...prev, ...items] : items);
+        setTotal(tot);
+        const nextOffset = offset + items.length;
+        setProdOffset(nextOffset);
+        setHasMore(!catFilter && nextOffset < tot);
+      })
       .catch(() => {});
   }, [catFilter]);
 
-  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  useEffect(() => { setProdOffset(0); fetchProducts(0, false); }, [catFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const WELCOME: Record<string, string> = {
     fr: "Bonjour, je suis Léa. Comment puis-je vous aider ?",
@@ -239,6 +254,8 @@ export default function LegaSite() {
         if (d.type === "text_chunk") {
           const chunk = stripEmoji(d.payload || "");
           if (!chunk) return;
+          setLeaStatus(s => s === "waiting" ? "thinking" : s);
+          setLeaThinkText("Léa rédige sa réponse...");
           setChatMsgs(prev => {
             const last = prev[prev.length - 1];
             if (last?.streaming) return [...prev.slice(0,-1), { ...last, text: last.text + chunk }];
@@ -264,6 +281,8 @@ export default function LegaSite() {
         if (d.type !== "agent_response") return;
         // Ignorer le greeting Tony — ce chat affiche uniquement Léa
         if (d.metadata?.agent === "tony") return;
+        setLeaStatus("done");
+        setTimeout(() => setLeaStatus(null), 350);
         const raw = d.payload || d.message || d.direct_response || "";
         setChatMsgs(prev => {
           const last = prev[prev.length - 1];
@@ -282,6 +301,8 @@ export default function LegaSite() {
     setChatMsgs(prev => [...prev, { role: "user", text: chatInput }]);
     ws.send(JSON.stringify({ payload: chatInput, lang, preferred_agent: "lea", canal: "web" }));
     setChatInput("");
+    setLeaStatus("waiting");
+    setLeaThinkText("");
   };
 
   const sendContact = async () => {
@@ -355,7 +376,7 @@ export default function LegaSite() {
 
       {/* ── HERO ────────────────────────────────────────────────────────── */}
       <section id="home" style={s({
-        background: `linear-gradient(rgba(27,63,110,0.72) 0%, rgba(27,63,110,0.5) 100%), url('${assetUrl(cfg["hero"]) || "https://images.unsplash.com/photo-1747004175907-e64576ba2e22?w=1600&q=80"}') center/cover no-repeat`,
+        background: `linear-gradient(rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.25) 100%), url('${assetUrl(cfg["hero"]) || "https://images.unsplash.com/photo-1747004175907-e64576ba2e22?w=1600&q=80"}') center/cover no-repeat`,
         color: "#fff", padding: "100px 24px 80px", textAlign: "center",
         minHeight: 480, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       })}>
@@ -403,7 +424,11 @@ export default function LegaSite() {
         <h2 style={s({ fontSize: 28, fontWeight: 700, color: C1, marginBottom: 8 })}>
           {T("nav_catalogue")}
         </h2>
-        <p style={s({ color: "#64748b", marginBottom: 28 })}>{total} annonces disponibles</p>
+        <p style={s({ color: "#64748b", marginBottom: 28 })}>
+          {products.length < total
+            ? `${products.length} / ${total} annonces`
+            : `${total} annonces disponibles`}
+        </p>
 
         {/* Filtres */}
         <div style={s({ display: "flex", gap: 12, marginBottom: 32, flexWrap: "wrap" })}>
@@ -420,7 +445,7 @@ export default function LegaSite() {
               placeholder={T("search_placeholder")}
               style={s({ flex: 1, padding: "10px 14px", border: `1px solid #e2e8f0`, borderRadius: "8px 0 0 8px", fontSize: 14 })}
             />
-            <button onClick={fetchProducts}
+            <button onClick={() => fetchProducts(0, false)}
               style={s({ padding: "10px 20px", background: C1, color: "#fff", border: "none", borderRadius: "0 8px 8px 0", fontWeight: 600, cursor: "pointer" })}>
               {T("search_btn")}
             </button>
@@ -434,12 +459,23 @@ export default function LegaSite() {
             <p>Chargement du catalogue...</p>
           </div>
         ) : (
-          <div style={s({ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 20 })}>
-            {products.map(p => (
-              <ProductCard key={p.id} product={p} t={T} c1={C1} c2={C2}
-                onClick={() => setSelectedProduct(p)} />
-            ))}
-          </div>
+          <>
+            <div style={s({ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 20 })}>
+              {products.map(p => (
+                <ProductCard key={p.id} product={p} t={T} c1={C1} c2={C2}
+                  onClick={() => setSelectedProduct(p)} />
+              ))}
+            </div>
+            {hasMore && (
+              <div style={s({ textAlign: "center", marginTop: 32 })}>
+                <button onClick={() => fetchProducts(prodOffset, true)}
+                  style={s({ padding: "12px 40px", background: C1, color: "#fff", border: "none",
+                    borderRadius: 8, fontWeight: 700, fontSize: 15, cursor: "pointer" })}>
+                  {T("load_more") || "Charger plus"} ({total - products.length})
+                </button>
+              </div>
+            )}
+          </>
         )}
       </section>
 
@@ -609,6 +645,35 @@ export default function LegaSite() {
               </div>
             ))}
           </div>
+          {/* ── Indicateur Léa ── */}
+          <style>{`
+            @keyframes lea-dot{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+            @keyframes lea-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+            @keyframes lea-fade{from{opacity:1}to{opacity:0}}
+            .lea-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#E8641E;margin:0 2px;animation:lea-dot 1.4s ease-in-out infinite}
+            .lea-dot:nth-child(2){animation-delay:.2s}.lea-dot:nth-child(3){animation-delay:.4s}
+            .lea-spin{display:inline-block;animation:lea-spin 1s linear infinite}
+            .lea-fade{animation:lea-fade 350ms ease forwards}
+          `}</style>
+          {leaStatus && (
+            <div className={leaStatus === "done" ? "lea-fade" : ""}
+              style={s({ padding:"6px 12px", borderTop:"1px solid #f1f5f9",
+                display:"flex", alignItems:"center", gap:8, fontSize:11, color:"#94a3b8",
+                background:"#fafafa", minHeight:30 })}>
+              {leaStatus === "waiting" ? (
+                <>
+                  <span className="lea-dot"/><span className="lea-dot"/><span className="lea-dot"/>
+                  <span style={s({marginLeft:4})}>Léa reçoit votre message...</span>
+                </>
+              ) : (
+                <>
+                  <span className="lea-spin" style={s({fontSize:13})}>⚙️</span>
+                  <span>{leaThinkText || "Léa rédige sa réponse..."}</span>
+                </>
+              )}
+            </div>
+          )}
+
           <div style={s({ padding: "10px 12px", borderTop: "1px solid #e2e8f0", display: "flex", gap: 8 })}>
             <input
               value={chatInput} onChange={e => setChatInput(e.target.value)}

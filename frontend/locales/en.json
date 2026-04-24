@@ -40,5 +40,6 @@
   "stat_countries": "countries",
   "stat_support": "support",
   "quote_ref_prefix": "Quote for",
-  "quote_for": "Quote request for"
+  "quote_for": "Quote request for",
+  "load_more": "Load more"
 }

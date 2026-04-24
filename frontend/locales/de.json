@@ -38,5 +38,6 @@
   "stat_machines": "Maschinen",
   "stat_langs": "Sprachen",
   "stat_countries": "Länder",
-  "stat_support": "Support"
+  "stat_support": "Support",
+  "load_more": "Mehr laden"
 }

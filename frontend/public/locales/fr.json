@@ -40,5 +40,6 @@
   "stat_countries": "pays",
   "stat_support": "support",
   "quote_ref_prefix": "Devis pour",
-  "quote_for": "Demande de devis pour"
+  "quote_for": "Demande de devis pour",
+  "load_more": "Charger plus"
 }

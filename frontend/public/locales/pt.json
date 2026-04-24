@@ -40,5 +40,6 @@
   "stat_countries": "países",
   "stat_support": "suporte",
   "quote_ref_prefix": "Orçamento para",
-  "quote_for": "Pedido de orçamento para"
+  "quote_for": "Pedido de orçamento para",
+  "load_more": "Carregar mais"
 }
