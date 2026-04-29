@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
+import HeroCarousel from "../components/HeroCarousel";
 
 const stripEmoji = (s: string) =>
   s.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E0}-\u{1F1FF}]/gu, "")
@@ -387,11 +388,7 @@ export default function LegaSite() {
       </nav>
 
       {/* ── HERO ────────────────────────────────────────────────────────── */}
-      <section id="home" style={s({
-        background: `linear-gradient(rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.25) 100%), url('${assetUrl(cfg["hero"]) || "https://images.unsplash.com/photo-1747004175907-e64576ba2e22?w=1600&q=80"}') center/cover no-repeat`,
-        color: "#fff", padding: "100px 24px 80px", textAlign: "center",
-        minHeight: 480, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-      })}>
+      <HeroCarousel siteBase={SITE_BASE}>
         <h1 style={s({ fontSize: "clamp(28px, 5vw, 52px)", fontWeight: 800, margin: "0 0 16px", lineHeight: 1.15, maxWidth: 700 })}>
           {cfg["site_name"] || "LEGA.PT"}
         </h1>
@@ -412,7 +409,7 @@ export default function LegaSite() {
             {T("hero_cta_contact")}
           </a>
         </div>
-      </section>
+      </HeroCarousel>
 
       {/* ── STATS ───────────────────────────────────────────────────────── */}
       <section style={s({ background: C2, color: "#fff", padding: "28px 24px" })}>
