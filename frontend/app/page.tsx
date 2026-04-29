@@ -102,6 +102,7 @@ export default function LegaSite() {
   const [quoteProductTitle, setQuoteProductTitle] = useState<string|null>(null);
   // Docs + auth
   const [client, setClient]           = useState<SiteClient|null>(null);
+  const [docsEnabled, setDocsEnabled] = useState(true);
   const [docsView, setDocsView]       = useState(false);
   const [loginOpen, setLoginOpen]     = useState(false);
   const [loginMode, setLoginMode]     = useState<"login"|"register">("login");
@@ -116,6 +117,14 @@ export default function LegaSite() {
 
   // Sync TTS ref
   useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
+
+  // Lire l'état de la section docs depuis le CMS
+  useEffect(() => {
+    fetch(`${SITE_API}/sections`).then(r => r.json()).then((rows: any[]) => {
+      const docSection = rows.find(s => s.name === 'docs');
+      if (docSection) setDocsEnabled(docSection.enabled);
+    }).catch(() => {});
+  }, []);
 
   // Restaurer session client
   useEffect(() => {
@@ -189,11 +198,12 @@ export default function LegaSite() {
   }, []);
 
   // Charger produits
-  const fetchProducts = useCallback((offset = 0, append = false) => {
-    // Quand un filtre catégorie est actif, on charge tout d'un coup (pas de pagination)
-    const limit = catFilter ? 999 : PROD_LIMIT;
+  const fetchProducts = useCallback((offset = 0, append = false, q = "") => {
+    const hasFilter = !!(catFilter || q);
+    const limit = hasFilter ? 999 : PROD_LIMIT;
     let url = `${SITE_API}/products?limit=${limit}&offset=${offset}&status=available`;
     if (catFilter) url += `&category=${catFilter}`;
+    if (q) url += `&q=${encodeURIComponent(q)}`;
     fetch(url)
       .then(r => r.json())
       .then(d => {
@@ -203,7 +213,7 @@ export default function LegaSite() {
         setTotal(tot);
         const nextOffset = offset + items.length;
         setProdOffset(nextOffset);
-        setHasMore(!catFilter && nextOffset < tot);
+        setHasMore(!hasFilter && nextOffset < tot);
       })
       .catch(() => {});
   }, [catFilter]);
@@ -348,9 +358,11 @@ export default function LegaSite() {
                 {T(k)}
               </a>
             ))}
+            {docsEnabled && (
             <button onClick={openDocs} style={s({ color: docsView ? "#fff" : "rgba(255,255,255,0.8)", background: docsView ? C2 : "rgba(255,255,255,0.12)", border: "none", fontSize: 14, padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontWeight: docsView ? 700 : 400 })}>
               {client ? "📄 Docs" : "📄 Documentation"}
             </button>
+            )}
             {client && (
               <span style={s({ color: "rgba(255,255,255,0.6)", fontSize: 12, marginInlineStart: 4 })}>
                 {client.name || client.email}
@@ -442,10 +454,11 @@ export default function LegaSite() {
           <div style={s({ display: "flex", flex: 1, gap: 0, minWidth: 240 })}>
             <input
               type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && fetchProducts(0, false, searchQ)}
               placeholder={T("search_placeholder")}
               style={s({ flex: 1, padding: "10px 14px", border: `1px solid #e2e8f0`, borderRadius: "8px 0 0 8px", fontSize: 14 })}
             />
-            <button onClick={() => fetchProducts(0, false)}
+            <button onClick={() => fetchProducts(0, false, searchQ)}
               style={s({ padding: "10px 20px", background: C1, color: "#fff", border: "none", borderRadius: "0 8px 8px 0", fontWeight: 600, cursor: "pointer" })}>
               {T("search_btn")}
             </button>
@@ -480,7 +493,7 @@ export default function LegaSite() {
       </section>
 
       {/* ── DOCUMENTATION ───────────────────────────────────────────────── */}
-      {docsView && client && (
+      {docsEnabled && docsView && client && (
         <section id="docs" style={s({ maxWidth: 1200, margin: "0 auto", padding: "60px 24px" })}>
           <h2 style={s({ fontSize: 28, fontWeight: 700, color: C1, marginBottom: 8 })}>Documentation technique</h2>
           <p style={s({ color: "#64748b", marginBottom: 28 })}>Connecté : {client.name || client.email}</p>
@@ -519,7 +532,7 @@ export default function LegaSite() {
           </div>
         </section>
       )}
-      {!docsView && (
+      {docsEnabled && !docsView && (
         <section style={s({ background: "#f1f5f9", padding: "40px 24px", textAlign: "center" })}>
           <p style={s({ color: "#475569", fontSize: 15, margin: "0 0 16px" })}>Accédez à notre documentation technique complète (manuels, fiches machines, réglementation)</p>
           <button onClick={openDocs} style={s({ background: C1, color: "#fff", border: "none", padding: "12px 28px", borderRadius: 8, fontWeight: 700, cursor: "pointer" })}>

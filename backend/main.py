@@ -252,7 +252,7 @@ async def upsert_translations_bulk(body: TranslationsBulkUpdate):
 # ── Produits ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/site/products")
-async def get_products(category: str = None, status: str = None, limit: int = 50, offset: int = 0):
+async def get_products(category: str = None, status: str = None, q: str = None, limit: int = 50, offset: int = 0):
     conn = await db_connect()
     try:
         where = []
@@ -262,13 +262,17 @@ async def get_products(category: str = None, status: str = None, limit: int = 50
             where.append(f"category=${i}"); vals.append(category); i += 1
         if status:
             where.append(f"status=${i}"); vals.append(status); i += 1
+        if q:
+            where.append(f"(title ILIKE ${i} OR brand ILIKE ${i+1} OR model ILIKE ${i+2})")
+            vals.extend([f"%{q}%", f"%{q}%", f"%{q}%"]); i += 3
         clause = f"WHERE {' AND '.join(where)}" if where else ""
+        count_vals = vals.copy()
         vals += [limit, offset]
         rows = await conn.fetch(
             f"SELECT * FROM site_products {clause} ORDER BY created_at DESC LIMIT ${i} OFFSET ${i+1}",
             *vals
         )
-        total = await conn.fetchval(f"SELECT COUNT(*) FROM site_products {clause}", *vals[:-2])
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM site_products {clause}", *count_vals)
         return {"total": total, "items": [dict(r) for r in rows]}
     finally:
         await conn.close()
