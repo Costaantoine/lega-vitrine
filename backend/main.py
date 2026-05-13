@@ -812,4 +812,151 @@ async def verify_client_token(token: str):
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(tob_scraper_cron())
+
+    conn = await db_connect()
+    try:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS hero_images (
+                id         SERIAL PRIMARY KEY,
+                client_id  TEXT DEFAULT 'lega',
+                url        TEXT NOT NULL,
+                alt_text   TEXT DEFAULT '',
+                position   INTEGER DEFAULT 0,
+                is_active  BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        # Valeur par défaut intervalle carrousel
+        await conn.execute(
+            "INSERT INTO site_config (key, value, updated_by) VALUES ('hero_interval_ms','3000','system') ON CONFLICT (key) DO NOTHING"
+        )
+        # Migrer l'image hero existante si présente
+        existing_hero = await conn.fetchval("SELECT value FROM site_config WHERE key='hero'")
+        if existing_hero:
+            count = await conn.fetchval('SELECT COUNT(*) FROM hero_images')
+            if count == 0:
+                await conn.execute(
+                    "INSERT INTO hero_images (url, alt_text, position) VALUES (\$1,'Hero image',0)",
+                    existing_hero,
+                )
+        await conn.close()
+    except Exception as e:
+        logger.warning(f'hero_images table init failed: {e}')
     logger.info("LEGA Site API started — cron scraper tob.pt actif")
+
+
+# ── Hero Images ───────────────────────────────────────────────────────────────
+
+import aiofiles as _aiofiles_hero  # déjà importé mais alias pour clarté
+from pathlib import Path as _PathHero
+
+HERO_UPLOAD_DIR = Path("/app/uploads/hero")
+HERO_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+@app.get("/api/site/hero-images")
+async def get_hero_images():
+    """Retourne la liste des images Hero actives triées par position + intervalle carrousel."""
+    conn = await db_connect()
+    try:
+        rows = await conn.fetch(
+            "SELECT id, url, alt_text, position FROM hero_images WHERE is_active=true ORDER BY position ASC"
+        )
+        cfg_row = await conn.fetchrow("SELECT value FROM site_config WHERE key='hero_interval_ms'")
+        interval_ms = int(cfg_row["value"]) if cfg_row else 3000
+        return {"images": [dict(r) for r in rows], "interval_ms": interval_ms}
+    finally:
+        await conn.close()
+
+
+@app.post("/admin/hero-images")
+async def add_hero_image(file: UploadFile = File(...), alt_text: str = ""):
+    """Upload une image Hero."""
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(400, "Format non supporté (jpg/png/webp)")
+    fname = f"hero_{uuid.uuid4().hex[:12]}{ext}"
+    fpath = HERO_UPLOAD_DIR / fname
+    async with aiofiles.open(fpath, "wb") as f:
+        await f.write(await file.read())
+    url = f"/uploads/hero/{fname}"
+    conn = await db_connect()
+    try:
+        max_pos = await conn.fetchval("SELECT COALESCE(MAX(position),0) FROM hero_images") or 0
+        row = await conn.fetchrow(
+            "INSERT INTO hero_images (url, alt_text, position) VALUES ($1,$2,$3) RETURNING id, url, alt_text, position",
+            url, alt_text, max_pos + 1,
+        )
+        return {"ok": True, **dict(row)}
+    finally:
+        await conn.close()
+
+
+@app.put("/admin/hero-images/reorder")
+async def reorder_hero_images(body: list):
+    """Met à jour l'ordre. Body : [{id, position}, ...]"""
+    conn = await db_connect()
+    try:
+        for item in body:
+            await conn.execute("UPDATE hero_images SET position=$1 WHERE id=$2", item["position"], item["id"])
+        return {"ok": True}
+    finally:
+        await conn.close()
+
+
+@app.put("/admin/hero-images/{image_id}")
+async def update_hero_image(image_id: int, body: dict):
+    """Modifie alt_text ou is_active."""
+    fields, params = [], []
+    if "is_active" in body:
+        fields.append(f"is_active=${len(params)+1}"); params.append(body["is_active"])
+    if "alt_text" in body:
+        fields.append(f"alt_text=${len(params)+1}"); params.append(body["alt_text"])
+    if not fields:
+        raise HTTPException(400, "Rien à modifier")
+    params.append(image_id)
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow(
+            f"UPDATE hero_images SET {','.join(fields)} WHERE id=${len(params)} RETURNING id, is_active", *params
+        )
+        if not row:
+            raise HTTPException(404, "Image introuvable")
+        return {"ok": True, "id": row["id"], "is_active": row["is_active"]}
+    finally:
+        await conn.close()
+
+
+@app.delete("/admin/hero-images/{image_id}")
+async def delete_hero_image(image_id: int):
+    """Supprime une image Hero."""
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow("DELETE FROM hero_images WHERE id=$1 RETURNING url", image_id)
+        if not row:
+            raise HTTPException(404, "Image introuvable")
+        url = row["url"]
+        if url.startswith("/uploads/hero/"):
+            fpath = Path("/app") / url.lstrip("/")
+            if fpath.exists():
+                fpath.unlink()
+        return {"ok": True, "deleted_id": image_id}
+    finally:
+        await conn.close()
+
+
+@app.put("/admin/site-config/hero-interval")
+async def update_hero_interval(body: dict):
+    """Met à jour l'intervalle du carrousel Hero en ms."""
+    value_ms = int(body.get("value_ms", 3000))
+    if value_ms < 1000 or value_ms > 30000:
+        raise HTTPException(400, "Intervalle entre 1000ms et 30000ms")
+    conn = await db_connect()
+    try:
+        await conn.execute(
+            "INSERT INTO site_config (key, value, updated_by) VALUES ('hero_interval_ms',$1,'dashboard') "
+            "ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()",
+            str(value_ms),
+        )
+        return {"ok": True, "hero_interval_ms": value_ms}
+    finally:
+        await conn.close()
