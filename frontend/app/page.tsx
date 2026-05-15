@@ -110,7 +110,7 @@ export default function LegaSite() {
   const [docsView, setDocsView]       = useState(false);
   const [loginOpen, setLoginOpen]     = useState(false);
   const [loginMode, setLoginMode]     = useState<"login"|"register">("login");
-  const [loginForm, setLoginForm]     = useState({email:"",password:"",name:"",company:""});
+  const [loginForm, setLoginForm]     = useState({email:"",password:"",confirmPassword:"",name:"",company:""});
   const [loginError, setLoginError]   = useState("");
   const [docsTree, setDocsTree]       = useState<DocNode[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<DocNode|null>(null);
@@ -187,12 +187,14 @@ export default function LegaSite() {
     } catch { setLoginError("Erreur de connexion"); }
   };
   const registerClient = async () => {
+    if (loginForm.password !== loginForm.confirmPassword) { setLoginError(T("password_mismatch")); return; }
+    if (loginForm.password.length < 8) { setLoginError(T("password_too_short")); return; }
     setLoginError("");
     try {
       const r = await fetch(`${SITE_API}/auth/register`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(loginForm) });
-      if (!r.ok) { const e = await r.json(); setLoginError(e.detail||"Erreur d'inscription"); return; }
+      if (!r.ok) { const e = await r.json(); setLoginError(e.detail||T("register_error")); return; }
       await loginClient();
-    } catch { setLoginError("Erreur d'inscription"); }
+    } catch { setLoginError(T("register_error")); }
   };
   const submitDlReq = async () => {
     if (!selectedDoc) return;
@@ -827,22 +829,24 @@ export default function LegaSite() {
       {loginOpen && (
         <div style={s({ position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16 })} onClick={() => setLoginOpen(false)}>
           <div style={s({ background:"#fff",borderRadius:16,padding:32,maxWidth:400,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.2)" })} onClick={e => e.stopPropagation()}>
-            <h3 style={s({ margin:"0 0 4px",fontSize:20,fontWeight:700,color:C1 })}>{loginMode==="login" ? "Connexion" : "Créer un compte"}</h3>
+            <h3 style={s({ margin:"0 0 4px",fontSize:20,fontWeight:700,color:C1 })}>{loginMode==="login" ? T("login_title") : T("create_account")}</h3>
             <p style={s({ color:"#64748b",fontSize:13,margin:"0 0 20px" })}>Accès à la documentation technique LEGA</p>
             {loginMode==="register" && <>
-              <input placeholder="Nom complet" value={loginForm.name} onChange={e=>setLoginForm(f=>({...f,name:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
-              <input placeholder="Société" value={loginForm.company} onChange={e=>setLoginForm(f=>({...f,company:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+              <input placeholder={T("register_name")} value={loginForm.name} onChange={e=>setLoginForm(f=>({...f,name:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+              <input placeholder={T("register_company")} value={loginForm.company} onChange={e=>setLoginForm(f=>({...f,company:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
             </>}
-            <input type="email" placeholder="Email" value={loginForm.email} onChange={e=>setLoginForm(f=>({...f,email:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
-            <input type="password" placeholder="Mot de passe" value={loginForm.password} onChange={e=>setLoginForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&(loginMode==="login"?loginClient():registerClient())} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+            <input type="email" placeholder={T("register_email")} value={loginForm.email} onChange={e=>setLoginForm(f=>({...f,email:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+            <input type="password" placeholder={T("register_password")} value={loginForm.password} onChange={e=>setLoginForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&loginMode==="login"&&loginClient()} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+            {loginMode==="register" && (
+              <input type="password" placeholder={T("confirm_password")} value={loginForm.confirmPassword} onChange={e=>setLoginForm(f=>({...f,confirmPassword:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&registerClient()} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+            )}
             {loginError && <p style={s({color:"#ef4444",fontSize:13,margin:"0 0 10px"})}>{loginError}</p>}
             <button onClick={loginMode==="login"?loginClient:registerClient} style={s({width:"100%",padding:"12px",background:C1,color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:15,cursor:"pointer",marginBottom:12})}>
-              {loginMode==="login" ? "Se connecter" : "Créer le compte"}
+              {loginMode==="login" ? T("login_submit") : T("register_submit")}
             </button>
             <p style={s({textAlign:"center",fontSize:13,color:"#64748b",margin:0})}>
-              {loginMode==="login" ? "Pas encore de compte ? " : "Déjà un compte ? "}
-              <button onClick={()=>{setLoginMode(loginMode==="login"?"register":"login");setLoginError("");}} style={s({background:"none",border:"none",color:C2,cursor:"pointer",fontWeight:700,fontSize:13})}>
-                {loginMode==="login" ? "Créer un compte" : "Se connecter"}
+              <button onClick={()=>{setLoginMode(loginMode==="login"?"register":"login");setLoginError("");setLoginForm(f=>({...f,password:"",confirmPassword:""}));}} style={s({background:"none",border:"none",color:C2,cursor:"pointer",fontWeight:700,fontSize:13})}>
+                {loginMode==="login" ? T("no_account") : T("already_account")}
               </button>
             </p>
           </div>
