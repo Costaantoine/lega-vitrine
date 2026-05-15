@@ -93,6 +93,7 @@ export default function LegaSite() {
   const audioCtxRef  = useRef<AudioContext|null>(null);
   const audioQueueRef = useRef<AudioBuffer[]>([]);
   const audioPlayingRef = useRef(false);
+  const leaRespondedRef = useRef(false);
   const [ws, setWs]               = useState<WebSocket|null>(null);
   const [leaStatus, setLeaStatus] = useState<'waiting'|'thinking'|'done'|null>(null);
   const [leaThinkText, setLeaThinkText] = useState('');
@@ -318,8 +319,10 @@ export default function LegaSite() {
         }
 
         if (d.type !== "agent_response") return;
-        // Ignorer le greeting Tony — ce chat affiche uniquement Léa
+        // Ignorer le greeting Tony et toute réponse après la première (évite le double remplacement)
         if (d.metadata?.agent === "tony") return;
+        if (leaRespondedRef.current) return;
+        leaRespondedRef.current = true;
         setLeaStatus("done");
         setTimeout(() => setLeaStatus(null), 350);
         const raw = d.payload || d.message || d.direct_response || "";
@@ -337,6 +340,7 @@ export default function LegaSite() {
   const sendChat = () => {
     if (!chatInput.trim()) return;
     if (!ws || ws.readyState !== WebSocket.OPEN) { openChat(); return; }
+    leaRespondedRef.current = false;
     setChatMsgs(prev => [...prev, { role: "user", text: chatInput }]);
     ws.send(JSON.stringify({ payload: chatInput, lang, preferred_agent: "lea", canal: "web" }));
     setChatInput("");
