@@ -281,6 +281,15 @@ export default function LegaSite() {
       try {
         const d = JSON.parse(e.data);
 
+        if (d.type === "waiting_message") {
+          const msg = stripEmoji(d.payload || "");
+          if (!msg) return;
+          setChatMsgs(prev => [...prev, { role: "assistant", text: msg }]);
+          setLeaStatus("thinking");
+          setLeaThinkText("Léa rédige sa réponse...");
+          return;
+        }
+
         if (d.type === "text_chunk") {
           const chunk = stripEmoji(d.payload || "");
           if (!chunk) return;
