@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import HeroCarousel from "../components/HeroCarousel";
+import PasswordInput from "../components/PasswordInput";
 
 const stripEmoji = (s: string) =>
   s.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E0}-\u{1F1FF}]/gu, "")
@@ -836,9 +837,21 @@ export default function LegaSite() {
               <input placeholder={T("register_company")} value={loginForm.company} onChange={e=>setLoginForm(f=>({...f,company:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
             </>}
             <input type="email" placeholder={T("register_email")} value={loginForm.email} onChange={e=>setLoginForm(f=>({...f,email:e.target.value}))} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
-            <input type="password" placeholder={T("register_password")} value={loginForm.password} onChange={e=>setLoginForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&loginMode==="login"&&loginClient()} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+            <PasswordInput
+              value={loginForm.password}
+              onChange={val=>setLoginForm(f=>({...f,password:val}))}
+              onKeyDown={e=>e.key==="Enter"&&loginMode==="login"?loginClient():undefined}
+              placeholder={T("register_password")}
+              style={s({padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14})}
+            />
             {loginMode==="register" && (
-              <input type="password" placeholder={T("confirm_password")} value={loginForm.confirmPassword} onChange={e=>setLoginForm(f=>({...f,confirmPassword:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&registerClient()} style={s({width:"100%",padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14,marginBottom:10,boxSizing:"border-box"})} />
+              <PasswordInput
+                value={loginForm.confirmPassword}
+                onChange={val=>setLoginForm(f=>({...f,confirmPassword:val}))}
+                onKeyDown={e=>e.key==="Enter"?registerClient():undefined}
+                placeholder={T("confirm_password")}
+                style={s({padding:"10px 12px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:14})}
+              />
             )}
             {loginError && <p style={s({color:"#ef4444",fontSize:13,margin:"0 0 10px"})}>{loginError}</p>}
             <button onClick={loginMode==="login"?loginClient:registerClient} style={s({width:"100%",padding:"12px",background:C1,color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:15,cursor:"pointer",marginBottom:12})}>
