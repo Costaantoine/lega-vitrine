@@ -16,16 +16,16 @@ const assetUrl = (v: string | undefined) =>
   v ? (v.startsWith("http") ? v : `${SITE_BASE}${v}`) : undefined;
 
 const LANGS = [
-  { code: "pt", label: "🇵🇹 PT", dir: "ltr" },
-  { code: "fr", label: "🇫🇷 FR", dir: "ltr" },
-  { code: "en", label: "🇬🇧 EN", dir: "ltr" },
-  { code: "es", label: "🇪🇸 ES", dir: "ltr" },
-  { code: "de", label: "🇩🇪 DE", dir: "ltr" },
-  { code: "it", label: "🇮🇹 IT", dir: "ltr" },
-  { code: "nl", label: "🇳🇱 NL", dir: "ltr" },
-  { code: "zh", label: "🇨🇳 ZH", dir: "ltr" },
-  { code: "ru", label: "🇷🇺 RU", dir: "ltr" },
-  { code: "ar", label: "🇸🇦 AR", dir: "rtl" },
+  { code: "pt", label: "Português",  short: "PT", flag: "/flags/pt.png", dir: "ltr" },
+  { code: "fr", label: "Français",   short: "FR", flag: "/flags/fr.png", dir: "ltr" },
+  { code: "en", label: "English",    short: "EN", flag: "/flags/gb.png", dir: "ltr" },
+  { code: "es", label: "Español",    short: "ES", flag: "/flags/es.png", dir: "ltr" },
+  { code: "de", label: "Deutsch",    short: "DE", flag: "/flags/de.png", dir: "ltr" },
+  { code: "it", label: "Italiano",   short: "IT", flag: "/flags/it.png", dir: "ltr" },
+  { code: "nl", label: "Nederlands", short: "NL", flag: "/flags/nl.png", dir: "ltr" },
+  { code: "zh", label: "中文",        short: "ZH", flag: "/flags/cn.png", dir: "ltr" },
+  { code: "ru", label: "Русский",    short: "RU", flag: "/flags/ru.png", dir: "ltr" },
+  { code: "ar", label: "العربية",    short: "AR", flag: "/flags/sa.png", dir: "rtl" },
 ];
 
 const CATEGORIES = ["machines_tp", "trucks", "trailers", "vans"];
@@ -37,26 +37,28 @@ const cache: Record<string, Dict> = {};
 
 async function loadLocale(lang: string): Promise<Dict> {
   if (cache[lang]) return cache[lang];
-  // 1. Essayer la DB (traductions éditables depuis le dashboard CMS)
+
+  // Base : fichier statique (toujours chargé — contient toutes les clés)
+  let base: Dict = {};
+  try {
+    const r = await fetch(`/locales/${lang}.json`);
+    if (r.ok) base = await r.json();
+  } catch {}
+
+  // Surcharge : traductions éditables depuis le dashboard CMS (écrasent la base)
   try {
     const r = await fetch(`${SITE_API}/translations/${lang}`);
     if (r.ok) {
       const d = await r.json();
       if (Object.keys(d).length > 0) {
-        cache[lang] = d;
-        return d;
+        cache[lang] = { ...base, ...d };
+        return cache[lang];
       }
     }
-  } catch { /* fallback fichier statique */ }
-  // 2. Fallback : fichier statique /locales/{lang}.json
-  try {
-    const r = await fetch(`/locales/${lang}.json`);
-    const d = await r.json();
-    cache[lang] = d;
-    return d;
-  } catch {
-    return {};
-  }
+  } catch {}
+
+  cache[lang] = base;
+  return base;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -103,7 +105,11 @@ export default function LegaSite() {
   const [quoteProductTitle, setQuoteProductTitle] = useState<string|null>(null);
   // Docs + auth
   const [client, setClient]           = useState<SiteClient|null>(null);
-  const [docsEnabled, setDocsEnabled] = useState(true);
+  const [docsEnabled, setDocsEnabled] = useState(false);
+  const [statsEnabled, setStatsEnabled] = useState(true);
+  const [aiBannerEnabled, setAiBannerEnabled] = useState(true);
+  const [catalogueEnabled, setCatalogueEnabled] = useState(true);
+  const [contactEnabled, setContactEnabled] = useState(true);
   const [docsView, setDocsView]       = useState(false);
   const [loginOpen, setLoginOpen]     = useState(false);
   const [loginMode, setLoginMode]     = useState<"login"|"register">("login");
@@ -115,15 +121,34 @@ export default function LegaSite() {
   const [dlReqOpen, setDlReqOpen]     = useState(false);
   const [dlReqForm, setDlReqForm]     = useState({client_name:"",client_email:"",client_company:"",motif:""});
   const [dlReqSent, setDlReqSent]     = useState(false);
+  const [isMobile, setIsMobile]       = useState(false);
+  const [navOpen, setNavOpen]         = useState(false);
+  const [langOpen, setLangOpen]       = useState(false);
+
+  // Détection viewport mobile
+  useEffect(() => {
+    const check = () => {
+      setIsMobile(window.innerWidth < 640);
+      if (window.innerWidth >= 640) setNavOpen(false);
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   // Sync TTS ref
   useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
 
-  // Lire l'état de la section docs depuis le CMS
+  // Lire l'état des sections depuis le CMS
   useEffect(() => {
     fetch(`${SITE_API}/sections`).then(r => r.json()).then((rows: any[]) => {
-      const docSection = rows.find(s => s.name === 'docs');
-      if (docSection) setDocsEnabled(docSection.enabled);
+      const sectionMap: Record<string, boolean> = {};
+      rows.forEach((s: any) => { sectionMap[s.name] = s.enabled; });
+      if ('docs' in sectionMap) setDocsEnabled(sectionMap['docs']);
+      if ('stats' in sectionMap) setStatsEnabled(sectionMap['stats']);
+      if ('ai_banner' in sectionMap) setAiBannerEnabled(sectionMap['ai_banner']);
+      if ('catalogue' in sectionMap) setCatalogueEnabled(sectionMap['catalogue']);
+      if ('contact' in sectionMap) setContactEnabled(sectionMap['contact']);
     }).catch(() => {});
   }, []);
 
@@ -334,16 +359,17 @@ export default function LegaSite() {
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div dir={dir} style={s({ minHeight: "100vh", background: "#f8fafc" })}>
+    <div dir={dir} style={s({ minHeight: "100vh", background: "#f8fafc", overflowX: "hidden" })}>
 
       {/* ── NAVBAR ──────────────────────────────────────────────────────── */}
       <nav style={s({
-        background: C1, color: "#fff", padding: "0 24px",
+        background: C1, color: "#fff", padding: "0 16px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         height: 64, position: "sticky", top: 0, zIndex: 100,
         boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
       })}>
-        <div style={s({ display: "flex", alignItems: "center", gap: 16 })}>
+        {/* Logo */}
+        <div style={s({ display: "flex", alignItems: "center", gap: 16, flexShrink: 0 })}>
           {assetUrl(cfg["logo"]) ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img src={assetUrl(cfg["logo"])} alt="LEGA.PT" style={s({ height: 36, objectFit: "contain" })} />
@@ -352,43 +378,140 @@ export default function LegaSite() {
               <span style={s({ color: C2 })}>LEGA</span>.PT
             </span>
           )}
-          <div style={s({ display: "flex", gap: 8, marginInlineStart: 24 })}>
-            {["nav_home","nav_catalogue","nav_contact"].map(k => (
-              <a key={k} href={`#${k.split("_")[1]}`}
-                style={s({ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 14, padding: "6px 12px", borderRadius: 6, transition: "background 0.15s" })}>
-                {T(k)}
-              </a>
+
+          {/* Liens desktop */}
+          {!isMobile && (
+            <div style={s({ display: "flex", gap: 8, marginInlineStart: 8 })}>
+              {["nav_home","nav_catalogue","nav_contact"].map(k => (
+                <a key={k} href={`#${k.split("_")[1]}`}
+                  style={s({ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 14, padding: "6px 12px", borderRadius: 6, transition: "background 0.15s" })}>
+                  {T(k)}
+                </a>
+              ))}
+              {docsEnabled && (
+                <button onClick={openDocs} style={s({ color: docsView ? "#fff" : "rgba(255,255,255,0.8)", background: docsView ? C2 : "rgba(255,255,255,0.12)", border: "none", fontSize: 14, padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontWeight: docsView ? 700 : 400 })}>
+                  📄 {client ? T("nav_docs_short") : T("nav_docs")}
+                </button>
+              )}
+              {client && (
+                <span style={s({ color: "rgba(255,255,255,0.6)", fontSize: 12, marginInlineStart: 4 })}>
+                  {client.name || client.email}
+                  <button onClick={() => { setClient(null); localStorage.removeItem("lega_client"); setDocsView(false); }}
+                    style={s({ background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 11, marginInlineStart: 6 })}>✕</button>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Langue desktop */}
+        {!isMobile && (
+          <div style={s({ display: "flex", alignItems: "center", gap: 8 })}>
+            {LANGS.map(l => (
+              <button key={l.code} onClick={() => setLang(l.code)}
+                style={s({
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "4px 8px", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600,
+                  background: lang === l.code ? C2 : "rgba(255,255,255,0.12)",
+                  color: lang === l.code ? "#fff" : "rgba(255,255,255,0.7)",
+                })}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={l.flag} alt={l.short} width={20} height={15} style={{ borderRadius: "2px", objectFit: "cover" }} />
+                {l.short}
+              </button>
             ))}
-            {docsEnabled && (
-            <button onClick={openDocs} style={s({ color: docsView ? "#fff" : "rgba(255,255,255,0.8)", background: docsView ? C2 : "rgba(255,255,255,0.12)", border: "none", fontSize: 14, padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontWeight: docsView ? 700 : 400 })}>
-              {client ? "📄 Docs" : "📄 Documentation"}
-            </button>
-            )}
-            {client && (
-              <span style={s({ color: "rgba(255,255,255,0.6)", fontSize: 12, marginInlineStart: 4 })}>
-                {client.name || client.email}
-                <button onClick={() => { setClient(null); localStorage.removeItem("lega_client"); setDocsView(false); }}
-                  style={s({ background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 11, marginInlineStart: 6 })}>✕</button>
-              </span>
-            )}
           </div>
-        </div>
-        <div style={s({ display: "flex", alignItems: "center", gap: 8 })}>
-          {LANGS.map(l => (
-            <button key={l.code} onClick={() => setLang(l.code)}
-              style={s({
-                padding: "4px 8px", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600,
-                background: lang === l.code ? C2 : "rgba(255,255,255,0.12)",
-                color: lang === l.code ? "#fff" : "rgba(255,255,255,0.7)",
-              })}>
-              {l.label}
+        )}
+
+        {/* Mobile : drapeau langue + hamburger */}
+        {isMobile && (
+          <div style={s({ display: "flex", alignItems: "center", gap: 4 })}>
+
+            {/* Dropdown langue compact */}
+            <div style={s({ position: "relative" })}>
+              <button onClick={() => setLangOpen(v => !v)}
+                style={s({ display: "flex", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.12)", border: "none", color: "#fff", cursor: "pointer", padding: "6px 10px", borderRadius: 6 })}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={(LANGS.find(l => l.code === lang) || LANGS[0]).flag} alt={lang.toUpperCase()} width={24} height={18} style={{ borderRadius: "2px", objectFit: "cover" }} />
+                <span style={s({ fontSize: 10, opacity: 0.8 })}>{langOpen ? "▲" : "▾"}</span>
+              </button>
+
+              {langOpen && (
+                <>
+                  {/* Overlay transparent pour fermer au clic en dehors */}
+                  <div style={s({ position: "fixed", inset: 0, zIndex: 149 })} onClick={() => setLangOpen(false)} />
+                  <div style={s({
+                    position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 150,
+                    background: "#fff", borderRadius: 8, boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+                    overflow: "hidden", minWidth: 160,
+                  })}>
+                    {LANGS.map(l => (
+                      <button key={l.code}
+                        onClick={() => { setLang(l.code); setLangOpen(false); }}
+                        style={s({
+                          display: "flex", alignItems: "center", gap: 10,
+                          width: "100%", padding: "10px 16px",
+                          background: l.code === lang ? "#f5f7fa" : "#fff",
+                          border: "none", borderBottom: "1px solid #f0f0f0",
+                          cursor: "pointer", fontSize: 14,
+                          color: C1, fontWeight: l.code === lang ? 600 : 400,
+                          textAlign: "left",
+                        })}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={l.flag} alt={l.short} width={24} height={18} style={{ borderRadius: "2px", objectFit: "cover" }} />
+                        <span>{l.label}</span>
+                        {l.code === lang && <span style={s({ marginLeft: "auto", color: C2 })}>✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Hamburger */}
+            <button onClick={() => setNavOpen(v => !v)}
+              style={s({ background: "none", border: "none", color: "#fff", fontSize: 26, cursor: "pointer", padding: "8px", lineHeight: 1 })}>
+              {navOpen ? "✕" : "☰"}
             </button>
-          ))}
-        </div>
+          </div>
+        )}
       </nav>
 
+      {/* Menu overlay mobile */}
+      {isMobile && navOpen && (
+        <div style={s({
+          position: "fixed", top: 64, left: 0, right: 0, bottom: 0,
+          background: C1, zIndex: 99,
+          display: "flex", flexDirection: "column",
+          alignItems: "center", paddingTop: 40, overflowY: "auto",
+        })}>
+          {/* Liens de navigation */}
+          {["nav_home","nav_catalogue","nav_contact"].map(k => (
+            <a key={k} href={`#${k.split("_")[1]}`}
+              onClick={() => setNavOpen(false)}
+              style={s({ color: "#fff", textDecoration: "none", fontSize: 20, fontWeight: 600, padding: "16px 0", width: "100%", textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.1)" })}>
+              {T(k)}
+            </a>
+          ))}
+          {docsEnabled && (
+            <button onClick={() => { openDocs(); setNavOpen(false); }}
+              style={s({ color: "#fff", background: "none", border: "none", fontSize: 20, fontWeight: 600, padding: "16px 0", width: "100%", cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.1)" })}>
+              📄 {client ? T("nav_docs_short") : T("nav_docs")}
+            </button>
+          )}
+          {client && (
+            <div style={s({ padding: "16px 0", borderBottom: "1px solid rgba(255,255,255,0.1)", width: "100%", textAlign: "center" })}>
+              <span style={s({ color: "rgba(255,255,255,0.7)", fontSize: 13 })}>{client.name || client.email}</span>
+              <button onClick={() => { setClient(null); localStorage.removeItem("lega_client"); setDocsView(false); setNavOpen(false); }}
+                style={s({ background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 12, marginInlineStart: 8 })}>✕</button>
+            </div>
+          )}
+
+        </div>
+      )}
+
       {/* ── HERO ────────────────────────────────────────────────────────── */}
-      <HeroCarousel siteBase={SITE_BASE}>
+      <HeroCarousel siteBase={SITE_BASE} colorPrimary={C1} colorSecondary={C2}>
         <h1 style={s({ fontSize: "clamp(28px, 5vw, 52px)", fontWeight: 800, margin: "0 0 16px", lineHeight: 1.15, maxWidth: 700 })}>
           {cfg["site_name"] || "LEGA.PT"}
         </h1>
@@ -412,7 +535,7 @@ export default function LegaSite() {
       </HeroCarousel>
 
       {/* ── STATS ───────────────────────────────────────────────────────── */}
-      <section style={s({ background: C2, color: "#fff", padding: "28px 24px" })}>
+      {statsEnabled && <section style={s({ background: C2, color: "#fff", padding: "28px 24px" })}>
         <div style={s({ maxWidth: 1000, margin: "0 auto", display: "flex", justifyContent: "space-around", flexWrap: "wrap", gap: 16 })}>
           {[
             { val: cfg["stat_machines"] || "400+", label: T("stat_machines") },
@@ -426,10 +549,10 @@ export default function LegaSite() {
             </div>
           ))}
         </div>
-      </section>
+      </section>}
 
       {/* ── CATALOGUE ───────────────────────────────────────────────────── */}
-      <section id="catalogue" style={s({ maxWidth: 1200, margin: "0 auto", padding: "60px 24px" })}>
+      {catalogueEnabled && <section id="catalogue" style={s({ maxWidth: 1200, margin: "0 auto", padding: "60px 24px" })}>
         <h2 style={s({ fontSize: 28, fontWeight: 700, color: C1, marginBottom: 8 })}>
           {T("nav_catalogue")}
         </h2>
@@ -470,7 +593,7 @@ export default function LegaSite() {
           </div>
         ) : (
           <>
-            <div style={s({ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 20 })}>
+            <div style={s({ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fill, minmax(280px, 1fr))", gap: isMobile ? 12 : 20, width: "100%" })}>
               {products.map(p => (
                 <ProductCard key={p.id} product={p} t={T} c1={C1} c2={C2}
                   onClick={() => setSelectedProduct(p)} />
@@ -481,23 +604,23 @@ export default function LegaSite() {
                 <button onClick={() => fetchProducts(prodOffset, true)}
                   style={s({ padding: "12px 40px", background: C1, color: "#fff", border: "none",
                     borderRadius: 8, fontWeight: 700, fontSize: 15, cursor: "pointer" })}>
-                  {T("load_more") || "Charger plus"} ({total - products.length})
+                  {T("load_more")} ({total - products.length})
                 </button>
               </div>
             )}
           </>
         )}
-      </section>
+      </section>}
 
       {/* ── DOCUMENTATION ───────────────────────────────────────────────── */}
       {docsEnabled && docsView && client && (
         <section id="docs" style={s({ maxWidth: 1200, margin: "0 auto", padding: "60px 24px" })}>
-          <h2 style={s({ fontSize: 28, fontWeight: 700, color: C1, marginBottom: 8 })}>Documentation technique</h2>
-          <p style={s({ color: "#64748b", marginBottom: 28 })}>Connecté : {client.name || client.email}</p>
-          <div style={s({ display: "grid", gridTemplateColumns: "280px 1fr", gap: 24, minHeight: 500 })}>
+          <h2 style={s({ fontSize: 28, fontWeight: 700, color: C1, marginBottom: 8 })}>{T("docs_title")}</h2>
+          <p style={s({ color: "#64748b", marginBottom: 28 })}>{T("docs_connected")} : {client.name || client.email}</p>
+          <div style={s({ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "280px 1fr", gap: 24, minHeight: isMobile ? "auto" : 500 })}>
             {/* Arborescence */}
             <div style={s({ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16, overflowY: "auto" })}>
-              <div style={s({ fontWeight: 700, fontSize: 13, color: C1, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.06em" })}>Documents</div>
+              <div style={s({ fontWeight: 700, fontSize: 13, color: C1, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.06em" })}>{T("docs_files_label")}</div>
               <DocTree nodes={docsTree} onSelect={loadDocContent} selected={selectedDoc} c2={C2} />
             </div>
             {/* Visionneuse */}
@@ -531,15 +654,15 @@ export default function LegaSite() {
       )}
       {docsEnabled && !docsView && (
         <section style={s({ background: "#f1f5f9", padding: "40px 24px", textAlign: "center" })}>
-          <p style={s({ color: "#475569", fontSize: 15, margin: "0 0 16px" })}>Accédez à notre documentation technique complète (manuels, fiches machines, réglementation)</p>
+          <p style={s({ color: "#475569", fontSize: 15, margin: "0 0 16px" })}>{T("docs_description")}</p>
           <button onClick={openDocs} style={s({ background: C1, color: "#fff", border: "none", padding: "12px 28px", borderRadius: 8, fontWeight: 700, cursor: "pointer" })}>
-            {client ? "Voir la documentation" : "Se connecter pour accéder aux docs"}
+            {client ? T("docs_btn_view") : T("docs_btn_access")}
           </button>
         </section>
       )}
 
       {/* ── AI BANNER ───────────────────────────────────────────────────── */}
-      <section style={s({
+      {aiBannerEnabled && <section style={s({
         background: `linear-gradient(135deg, ${C1} 0%, #0f2a50 100%)`,
         color: "#fff", padding: "48px 24px", textAlign: "center",
       })}>
@@ -552,10 +675,10 @@ export default function LegaSite() {
             💬 Chat IA
           </button>
         </div>
-      </section>
+      </section>}
 
       {/* ── CONTACT ─────────────────────────────────────────────────────── */}
-      <section id="contact" style={s({ maxWidth: 700, margin: "0 auto", padding: "60px 24px" })}>
+      {contactEnabled && <section id="contact" style={s({ maxWidth: 700, margin: "0 auto", padding: "60px 24px" })}>
         <h2 style={s({ fontSize: 28, fontWeight: 700, color: C1, marginBottom: 32 })}>{T("contact_title")}</h2>
         {contactSent ? (
           <div style={s({ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 10, padding: "20px 24px", color: "#166534", fontWeight: 600 })}>
@@ -598,7 +721,7 @@ export default function LegaSite() {
           <div>🕐 {T("footer_hours")}</div>
           <div>🏛️ {T("footer_nif")} : PT 510 245 447</div>
         </div>
-      </section>
+      </section>}
 
       {/* ── FOOTER ──────────────────────────────────────────────────────── */}
       <footer style={s({ background: C1, color: "rgba(255,255,255,0.7)", padding: "24px", textAlign: "center", fontSize: 13 })}>
@@ -617,8 +740,13 @@ export default function LegaSite() {
       )}
       {chatOpen && (
         <div style={s({
-          position: "fixed", bottom: 28, insetInlineEnd: 28, zIndex: 200,
-          width: 340, height: 480, background: "#fff",
+          position: "fixed",
+          bottom: isMobile ? 16 : 28,
+          insetInlineEnd: isMobile ? 16 : 28,
+          zIndex: 200,
+          width: isMobile ? "calc(100vw - 32px)" : 340,
+          height: isMobile ? "60vh" : 480,
+          background: "#fff",
           borderRadius: 16, boxShadow: "0 8px 40px rgba(0,0,0,0.2)",
           display: "flex", flexDirection: "column", overflow: "hidden",
           border: `2px solid ${C2}`,
@@ -804,7 +932,7 @@ function ProductCard({ product: p, t, c1, c2, onClick }:
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 18, fontWeight: 800, color: c1 }}>
-            {p.price ? `${p.price.toLocaleString()} ${p.currency || "€"}` : "Sur demande"}
+            {p.price ? `${p.price.toLocaleString()} ${p.currency || "€"}` : t("price_on_request")}
           </span>
           <span style={{
             fontSize: 11, padding: "3px 8px", borderRadius: 4, fontWeight: 600,
@@ -841,21 +969,21 @@ function ProductModal({ product: p, t, c1, c2, onClose, onQuote }:
           </div>
           <h2 style={{ margin: "0 0 16px", fontSize: 22, fontWeight: 800, color: "#1e293b" }}>{p.title}</h2>
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 14, color: "#475569", marginBottom: 16 }}>
-            {p.brand && <span><strong>Marque :</strong> {p.brand}</span>}
-            {p.model && <span><strong>Modèle :</strong> {p.model}</span>}
-            {p.year  && <span><strong>Année :</strong> {p.year}</span>}
-            {p.hours && <span><strong>Heures :</strong> {p.hours.toLocaleString()}h</span>}
+            {p.brand && <span><strong>{t("lbl_brand")} :</strong> {p.brand}</span>}
+            {p.model && <span><strong>{t("lbl_model")} :</strong> {p.model}</span>}
+            {p.year  && <span><strong>{t("lbl_year")} :</strong> {p.year}</span>}
+            {p.hours && <span><strong>{t("lbl_hours")} :</strong> {p.hours.toLocaleString()}h</span>}
             {p.location && <span>📍 {p.location}</span>}
           </div>
           {p.description && <p style={{ color: "#475569", lineHeight: 1.6, marginBottom: 20 }}>{p.description}</p>}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <span style={{ fontSize: 26, fontWeight: 800, color: c1 }}>
-              {p.price ? `${p.price.toLocaleString()} ${p.currency || "€"}` : "Sur demande"}
+              {p.price ? `${p.price.toLocaleString()} ${p.currency || "€"}` : t("price_on_request")}
             </span>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={onClose}
                 style={{ padding: "10px 20px", border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff", cursor: "pointer" }}>
-                ✕ Fermer
+                ✕ {t("btn_close")}
               </button>
               <button onClick={onQuote}
                 style={{ padding: "10px 24px", background: c2, color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>

@@ -22,6 +22,7 @@
   "status_new": "Neuf",
   "btn_details": "Voir détails",
   "btn_quote": "Demander un devis",
+  "btn_close": "Fermer",
   "contact_title": "Contactez-nous",
   "contact_name": "Nom complet",
   "contact_email": "E-mail",
@@ -41,5 +42,18 @@
   "stat_support": "support",
   "quote_ref_prefix": "Devis pour",
   "quote_for": "Demande de devis pour",
-  "load_more": "Charger plus"
+  "load_more": "Charger plus",
+  "price_on_request": "Sur demande",
+  "lbl_brand": "Marque",
+  "lbl_model": "Modèle",
+  "lbl_year": "Année",
+  "lbl_hours": "Heures",
+  "nav_docs": "Documentation",
+  "nav_docs_short": "Docs",
+  "docs_title": "Documentation technique",
+  "docs_description": "Accédez à notre documentation technique complète (manuels, fiches machines, réglementation)",
+  "docs_btn_view": "Voir la documentation",
+  "docs_btn_access": "Se connecter pour accéder aux docs",
+  "docs_connected": "Connecté",
+  "docs_files_label": "Documents"
 }

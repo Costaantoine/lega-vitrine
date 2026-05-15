@@ -22,6 +22,7 @@
   "status_new": "Novo",
   "btn_details": "Ver detalhes",
   "btn_quote": "Pedir orçamento",
+  "btn_close": "Fechar",
   "contact_title": "Contacte-nos",
   "contact_name": "Nome completo",
   "contact_email": "E-mail",
@@ -41,5 +42,18 @@
   "stat_support": "suporte",
   "quote_ref_prefix": "Orçamento para",
   "quote_for": "Pedido de orçamento para",
-  "load_more": "Carregar mais"
+  "load_more": "Carregar mais",
+  "price_on_request": "Sob consulta",
+  "lbl_brand": "Marca",
+  "lbl_model": "Modelo",
+  "lbl_year": "Ano",
+  "lbl_hours": "Horas",
+  "nav_docs": "Documentação",
+  "nav_docs_short": "Docs",
+  "docs_title": "Documentação técnica",
+  "docs_description": "Aceda à nossa documentação técnica completa (manuais, fichas de máquinas, regulamentação)",
+  "docs_btn_view": "Ver a documentação",
+  "docs_btn_access": "Iniciar sessão para aceder à documentação",
+  "docs_connected": "Ligado",
+  "docs_files_label": "Documentos"
 }

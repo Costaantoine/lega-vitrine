@@ -22,6 +22,7 @@
   "status_new": "New",
   "btn_details": "View details",
   "btn_quote": "Request quote",
+  "btn_close": "Close",
   "contact_title": "Contact us",
   "contact_name": "Full name",
   "contact_email": "Email",
@@ -41,5 +42,18 @@
   "stat_support": "support",
   "quote_ref_prefix": "Quote for",
   "quote_for": "Quote request for",
-  "load_more": "Load more"
+  "load_more": "Load more",
+  "price_on_request": "On request",
+  "lbl_brand": "Brand",
+  "lbl_model": "Model",
+  "lbl_year": "Year",
+  "lbl_hours": "Hours",
+  "nav_docs": "Documentation",
+  "nav_docs_short": "Docs",
+  "docs_title": "Technical documentation",
+  "docs_description": "Access our complete technical documentation (manuals, machine sheets, regulations)",
+  "docs_btn_view": "View documentation",
+  "docs_btn_access": "Log in to access documentation",
+  "docs_connected": "Connected",
+  "docs_files_label": "Documents"
 }
