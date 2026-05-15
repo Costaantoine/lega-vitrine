@@ -1,0 +1,70 @@
+networks:
+  coolify:
+    external: true
+  lega-net:
+    driver: bridge
+  bvi-shared:
+    external: true
+    name: bvi_bvi-net
+
+services:
+  lega-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      BVI_API_URL: ${BVI_API_URL}
+      DOCS_BASE_PATH: /app/docs
+      SITE_BASE_URL: ${SITE_BASE_URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      SMTP_FROM: ${SMTP_FROM}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      JWT_SECRET_CLIENT: ${JWT_SECRET_CLIENT}
+    volumes:
+      - lega-uploads:/app/uploads
+      - bvi-docs:/app/docs:ro
+    networks:
+      - lega-net
+      - bvi-shared
+      - coolify
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lega-api.rule=Host(`lega.pt`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.lega-api.priority=10"
+      - "traefik.http.routers.lega-api.tls=true"
+      - "traefik.http.routers.lega-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.lega-api.loadbalancer.server.port=8000"
+
+  lega-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_SITE_API_URL: ${NEXT_PUBLIC_SITE_API_URL}
+      NEXT_PUBLIC_BVI_WS_URL: ${NEXT_PUBLIC_BVI_WS_URL}
+      SITE_API_URL: http://lega-backend:8000
+    networks:
+      - lega-net
+      - coolify
+    depends_on:
+      - lega-backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lega-frontend.rule=Host(`lega.pt`)"
+      - "traefik.http.routers.lega-frontend.priority=1"
+      - "traefik.http.routers.lega-frontend.tls=true"
+      - "traefik.http.routers.lega-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.lega-frontend.loadbalancer.server.port=3000"
+
+volumes:
+  lega-uploads:
+    driver: local
+  bvi-docs:
+    external: true
+    name: bvi_bvi-docs
