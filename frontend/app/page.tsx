@@ -84,9 +84,6 @@ export default function LegaSite() {
   const [total, setTotal]       = useState(0);
   const [catFilter, setCatFilter] = useState("");
   const [searchQ, setSearchQ]     = useState("");
-  const [prodOffset, setProdOffset] = useState(0);
-  const [hasMore, setHasMore]       = useState(false);
-  const PROD_LIMIT = 12;
   const [chatOpen, setChatOpen]   = useState(false);
   const [chatMsgs, setChatMsgs]   = useState<{role:string; text:string; streaming?:boolean}[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -224,27 +221,21 @@ export default function LegaSite() {
   }, []);
 
   // Charger produits
-  const fetchProducts = useCallback((offset = 0, append = false, q = "") => {
-    const hasFilter = !!(catFilter || q);
-    const limit = hasFilter ? 999 : PROD_LIMIT;
-    let url = `${SITE_API}/products?limit=${limit}&offset=${offset}&status=available`;
+  const fetchProducts = useCallback((q = "") => {
+    let url = `${SITE_API}/products?limit=999&status=available`;
     if (catFilter) url += `&category=${catFilter}`;
     if (q) url += `&q=${encodeURIComponent(q)}`;
     fetch(url)
       .then(r => r.json())
       .then(d => {
         const items = d.items || [];
-        const tot   = d.total || 0;
-        setProducts(prev => append ? [...prev, ...items] : items);
-        setTotal(tot);
-        const nextOffset = offset + items.length;
-        setProdOffset(nextOffset);
-        setHasMore(!hasFilter && nextOffset < tot);
+        setProducts(items);
+        setTotal(d.total || items.length);
       })
       .catch(() => {});
   }, [catFilter]);
 
-  useEffect(() => { setProdOffset(0); fetchProducts(0, false); }, [catFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchProducts(); }, [catFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const WELCOME: Record<string, string> = {
     fr: "Bonjour, je suis Léa. Comment puis-je vous aider ?",
@@ -574,11 +565,11 @@ export default function LegaSite() {
           <div style={s({ display: "flex", flex: 1, gap: 0, minWidth: 240 })}>
             <input
               type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && fetchProducts(0, false, searchQ)}
+              onKeyDown={e => e.key === "Enter" && fetchProducts(searchQ)}
               placeholder={T("search_placeholder")}
               style={s({ flex: 1, padding: "10px 14px", border: `1px solid #e2e8f0`, borderRadius: "8px 0 0 8px", fontSize: 14 })}
             />
-            <button onClick={() => fetchProducts(0, false, searchQ)}
+            <button onClick={() => fetchProducts(searchQ)}
               style={s({ padding: "10px 20px", background: C1, color: "#fff", border: "none", borderRadius: "0 8px 8px 0", fontWeight: 600, cursor: "pointer" })}>
               {T("search_btn")}
             </button>
@@ -594,20 +585,12 @@ export default function LegaSite() {
         ) : (
           <>
             <div style={s({ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fill, minmax(280px, 1fr))", gap: isMobile ? 12 : 20, width: "100%" })}>
-              {products.map(p => (
+              {products.map((p, idx) => (
                 <ProductCard key={p.id} product={p} t={T} c1={C1} c2={C2}
+                  eager={idx < 8}
                   onClick={() => setSelectedProduct(p)} />
               ))}
             </div>
-            {hasMore && (
-              <div style={s({ textAlign: "center", marginTop: 32 })}>
-                <button onClick={() => fetchProducts(prodOffset, true)}
-                  style={s({ padding: "12px 40px", background: C1, color: "#fff", border: "none",
-                    borderRadius: 8, fontWeight: 700, fontSize: 15, cursor: "pointer" })}>
-                  {T("load_more")} ({total - products.length})
-                </button>
-              </div>
-            )}
           </>
         )}
       </section>}
@@ -899,8 +882,8 @@ export default function LegaSite() {
 }
 
 // ── ProductCard ─────────────────────────────────────────────────────────────
-function ProductCard({ product: p, t, c1, c2, onClick }:
-  { product: Product; t: (k:string)=>string; c1:string; c2:string; onClick:()=>void }) {
+function ProductCard({ product: p, t, c1, c2, onClick, eager = false }:
+  { product: Product; t: (k:string)=>string; c1:string; c2:string; onClick:()=>void; eager?: boolean }) {
   const imgs = Array.isArray(p.images) ? p.images : (typeof p.images === "string" ? JSON.parse(p.images||"[]") : []);
   const thumb = imgs[0] || `https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=400&q=60`;
   return (
@@ -915,7 +898,7 @@ function ProductCard({ product: p, t, c1, c2, onClick }:
     >
       <div style={{ height: 180, background: "#f1f5f9", overflow: "hidden" }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={thumb} alt={p.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <img src={thumb} alt={p.title} loading={eager ? "eager" : "lazy"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </div>
       <div style={{ padding: "14px 16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
