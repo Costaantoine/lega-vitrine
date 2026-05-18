@@ -127,7 +127,12 @@ class SectionUpdate(BaseModel):
     config: dict = None
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
+# ── Health ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/site")
+async def site_root():
+    return {"status": "ok", "service": "lega-site-api", "version": "1.0.0"}
+
 
 @app.get("/api/site/health")
 async def health():
