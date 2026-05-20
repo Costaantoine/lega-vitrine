@@ -123,6 +123,7 @@ export default function LegaSite() {
   const [isMobile, setIsMobile]       = useState(false);
   const [navOpen, setNavOpen]         = useState(false);
   const [langOpen, setLangOpen]       = useState(false);
+  const [showAll, setShowAll]         = useState(false);
 
   // Détection viewport mobile
   useEffect(() => {
@@ -263,7 +264,10 @@ export default function LegaSite() {
     if (ws?.readyState === WebSocket.OPEN) return;
     if (ws) { try { ws.close(); } catch {} setWs(null); }
     const sid = `lega-vitrine-${Date.now()}`;
-    const socket = new WebSocket(`${BVI_WS}?session_id=${sid}&preferred_agent=standardiste`);
+    const wsUrl = typeof window !== 'undefined' && window.location.protocol === 'https:'
+      ? `wss://${window.location.host}/ws/stream`
+      : (process.env.NEXT_PUBLIC_BVI_WS_URL || "ws://76.13.141.221:8002/ws/stream");
+    const socket = new WebSocket(`${wsUrl}?session_id=${sid}&preferred_agent=standardiste`);
     const handleDisconnect = () => setWs(null);
     socket.onclose = handleDisconnect;
     socket.onerror = handleDisconnect;
@@ -391,6 +395,7 @@ export default function LegaSite() {
             <div style={s({ display: "flex", gap: 8, marginInlineStart: 8 })}>
               {["nav_home","nav_catalogue","nav_contact"].map(k => (
                 <a key={k} href={`#${k.split("_")[1]}`}
+                  onClick={k === "nav_catalogue" ? () => setShowAll(true) : undefined}
                   style={s({ color: "rgba(255,255,255,0.8)", textDecoration: "none", fontSize: 14, padding: "6px 12px", borderRadius: 6, transition: "background 0.15s" })}>
                   {T(k)}
                 </a>
@@ -495,7 +500,7 @@ export default function LegaSite() {
           {/* Liens de navigation */}
           {["nav_home","nav_catalogue","nav_contact"].map(k => (
             <a key={k} href={`#${k.split("_")[1]}`}
-              onClick={() => setNavOpen(false)}
+              onClick={() => { if (k === "nav_catalogue") setShowAll(true); setNavOpen(false); }}
               style={s({ color: "#fff", textDecoration: "none", fontSize: 20, fontWeight: 600, padding: "16px 0", width: "100%", textAlign: "center", borderBottom: "1px solid rgba(255,255,255,0.1)" })}>
               {T(k)}
             </a>
@@ -601,12 +606,22 @@ export default function LegaSite() {
         ) : (
           <>
             <div style={s({ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fill, minmax(280px, 1fr))", gap: isMobile ? 12 : 20, width: "100%" })}>
-              {products.map((p, idx) => (
+              {products.slice(0, showAll ? products.length : 12).map((p, idx) => (
                 <ProductCard key={p.id} product={p} t={T} c1={C1} c2={C2}
                   eager={idx < 8}
                   onClick={() => setSelectedProduct(p)} />
               ))}
             </div>
+            {!showAll && products.length > 12 && (
+              <div style={s({ textAlign: "center", marginTop: 32 })}>
+                <button onClick={() => setShowAll(true)} style={s({
+                  padding: "14px 32px", background: C1, color: "#fff", border: "none",
+                  borderRadius: 8, fontWeight: 700, fontSize: 15, cursor: "pointer",
+                })}>
+                  {`Voir les ${total - 12} autres annonces →`}
+                </button>
+              </div>
+            )}
           </>
         )}
       </section>}
@@ -928,7 +943,7 @@ function ProductCard({ product: p, t, c1, c2, onClick, eager = false }:
     >
       <div style={{ height: 180, background: "#f1f5f9", overflow: "hidden" }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={thumb} alt={p.title} loading={eager ? "eager" : "lazy"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <img src={thumb} alt={p.title} loading={eager ? "eager" : "lazy"} referrerPolicy="no-referrer" onError={e => { (e.currentTarget as HTMLImageElement).src = "https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=400&q=60"; }} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </div>
       <div style={{ padding: "14px 16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
@@ -949,6 +964,7 @@ function ProductCard({ product: p, t, c1, c2, onClick, eager = false }:
           </span>
           <span style={{
             fontSize: 11, padding: "3px 8px", borderRadius: 4, fontWeight: 600,
+            whiteSpace: "nowrap", flexShrink: 0,
             background: p.status === "available" ? "#dcfce7" : p.status === "reserved" ? "#fef9c3" : "#f1f5f9",
             color: p.status === "available" ? "#166534" : p.status === "reserved" ? "#854d0e" : "#475569",
           }}>
@@ -975,7 +991,7 @@ function ProductModal({ product: p, t, c1, c2, onClose, onQuote }:
         maxHeight: "90vh", overflowY: "auto",
       }} onClick={e => e.stopPropagation()}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={thumb} alt={p.title} style={{ width: "100%", height: 280, objectFit: "cover", borderRadius: "16px 16px 0 0" }} />
+        <img src={thumb} alt={p.title} referrerPolicy="no-referrer" onError={e => { (e.currentTarget as HTMLImageElement).src = "https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=800&q=80"; }} style={{ width: "100%", height: 280, objectFit: "cover", borderRadius: "16px 16px 0 0" }} />
         <div style={{ padding: 24 }}>
           <div style={{ fontSize: 12, color: c2, fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>
             {t(`cat_${p.category}`) || p.category}
