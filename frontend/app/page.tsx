@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import HeroCarousel from "../components/HeroCarousel";
 import PasswordInput from "../components/PasswordInput";
 
@@ -124,6 +124,12 @@ export default function LegaSite() {
   const [navOpen, setNavOpen]         = useState(false);
   const [langOpen, setLangOpen]       = useState(false);
   const [showAll, setShowAll]         = useState(false);
+
+  // Mode preview : ?preview=true affiche le site complet (pour dev/admin)
+  const isPreview = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("preview") === "true";
+  }, []);
 
   // Détection viewport mobile
   useEffect(() => {
@@ -369,6 +375,61 @@ export default function LegaSite() {
   const C2 = cfg["color_secondary"] || "#E8641E";
 
   // ── Render ───────────────────────────────────────────────────────────────
+
+  // Mode "Coming Soon" — visible sauf si ?preview=true
+  if (!isPreview) {
+    return (
+      <div style={s({ minHeight: "100vh", background: "#f8fafc", overflow: "hidden" })}>
+        {/* ── Language selector flottant ── */}
+        <div style={s({
+          position: "fixed", top: 16, right: 16, zIndex: 100,
+          display: "flex", gap: 6,
+        })}>
+          {LANGS.map(l => (
+            <button key={l.code} onClick={() => setLang(l.code)}
+              style={s({
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "6px 10px", border: "none", borderRadius: 6,
+                cursor: "pointer", fontSize: 12, fontWeight: 600,
+                background: lang === l.code ? C2 : "rgba(0,0,0,0.35)",
+                color: lang === l.code ? "#fff" : "rgba(255,255,255,0.8)",
+                backdropFilter: "blur(4px)",
+              })}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={l.flag} alt={l.short} width={20} height={15}
+                style={{ borderRadius: "2px", objectFit: "cover" }} />
+              {l.short}
+            </button>
+          ))}
+        </div>
+
+        <HeroCarousel siteBase={SITE_BASE} colorPrimary={C1} colorSecondary={C2}>
+          <div style={s({
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            minHeight: "60vh",
+          })}>
+            <h1 style={s({
+              fontSize: "clamp(36px, 8vw, 72px)",
+              fontWeight: 800, margin: "0 0 16px",
+              lineHeight: 1.15, letterSpacing: "-0.03em",
+              textShadow: "0 2px 20px rgba(0,0,0,0.3)",
+            })}>
+              {t["bientot"] || "Bientôt Disponible"}
+            </h1>
+            <p style={s({
+              fontSize: "clamp(16px, 3vw, 24px)",
+              margin: "0 0 40px", opacity: 0.9,
+              maxWidth: 500, textAlign: "center",
+            })}>
+              {t["coming_soon_sub"] || "LEGA.PT arrive bientôt. Restez connecté pour découvrir notre sélection de machines TP et véhicules."}
+            </p>
+          </div>
+        </HeroCarousel>
+      </div>
+    );
+  }
+
   return (
     <div dir={dir} style={s({ minHeight: "100vh", background: "#f8fafc", overflowX: "hidden" })}>
 
@@ -618,7 +679,7 @@ export default function LegaSite() {
                   padding: "14px 32px", background: C1, color: "#fff", border: "none",
                   borderRadius: 8, fontWeight: 700, fontSize: 15, cursor: "pointer",
                 })}>
-                  {`Voir les ${total - 12} autres annonces →`}
+                  {`${T("load_more")} (${total - 12})`}
                 </button>
               </div>
             )}
